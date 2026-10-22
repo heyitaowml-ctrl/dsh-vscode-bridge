@@ -14,7 +14,7 @@ VS Code extension
        └─ DSH Host plugin (this package)
             └─ SSE /dsh-vscode/events
                  └─ DSH browser plugin
-                      └─ conversation.composer.dock → InputActions.insertText()
+                      └─ conversation.input.left → InputActions.insertText()
 ```
 
 The Host half writes its endpoint and token to `~/.dsh/vscode-bridge.json` (override with `DSH_VSCODE_BRIDGE_FILE`). The VS Code extension reads that file automatically, so no manual token copying is needed. The token file is regenerated when the DSH process/plugin starts.

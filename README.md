@@ -9,20 +9,21 @@
 | [`dsh-vscode-bridge/`](dsh-vscode-bridge/) | DSH bundle：Host HTTP/SSE 服务 + 浏览器端输入框注入 |
 | [`vscode-dsh-bridge/`](vscode-dsh-bridge/) | VS Code 扩展源码 |
 | [`dist/dsh-vscode-bridge-1.0.0.vsix`](dist/dsh-vscode-bridge-1.0.0.vsix) | 可直接安装的 VS Code 扩展包 |
-| [`dist/dsh-vscode-bridge-1.0.2.zip`](dist/dsh-vscode-bridge-1.0.2.zip) | DSH bundle 的单文件分发包（Windows 解压后安装） |
-| [`dist/dsh-vscode-bridge-1.0.2.tgz`](dist/dsh-vscode-bridge-1.0.2.tgz) | 同一 bundle 的 tar.gz 分发包（带正斜杠路径，跨平台） |
-| [`dist/local-dsh-vscode-bridge-1.0.2.tgz`](dist/local-dsh-vscode-bridge-1.0.2.tgz) | **npm 格式 tarball**，可托管到 Gitee 后用 URL 直接安装 |
+| [`dist/dsh-vscode-bridge-1.0.4.zip`](dist/dsh-vscode-bridge-1.0.4.zip) | DSH bundle 的单文件分发包（Windows 解压后安装） |
+| [`dist/dsh-vscode-bridge-1.0.4.tgz`](dist/dsh-vscode-bridge-1.0.4.tgz) | 同一 bundle 的 tar.gz 分发包（带正斜杠路径，跨平台） |
+| [`dist/local-dsh-vscode-bridge-1.0.4.tgz`](dist/local-dsh-vscode-bridge-1.0.4.tgz) | **npm 格式 tarball**，可托管到 Gitee 后用 URL 直接安装 |
 | [`scripts/build-vsix.ps1`](scripts/build-vsix.ps1) | 重新构建 VSIX |
 | [`tests/bridge-e2e.mjs`](tests/bridge-e2e.mjs) | Host 路由 / 队列 / SSE 回归测试 |
 | [`tests/test-extension.cjs`](tests/test-extension.cjs) | 用 mock `vscode` 走通扩展命令的集成测试 |
 
 ## 当前状态
 
-- DSH bundle `@local/dsh-vscode-bridge@1.0.2` 已安装到 `desktop` profile，状态为 `active`。
+- DSH bundle `@local/dsh-vscode-bridge@1.0.4` 已安装到 `desktop` profile，状态为 `active`。
+- 1.0.4 修复：客户端订阅从 `conversation.composer.dock` 移到 `conversation.input.left`，新会话 hero 区在发送第一条消息前也能收到 VSCode 路径。
 - VS Code 扩展 `local.dsh-vscode-bridge@1.0.0` 已通过 VSIX 安装。
 - DSH 页面已重载，浏览器端客户端已连接（`clients: 1`）。
-- 已在真实 DSH 页面中验证：Host 收到附件后，输入框出现
-  `@C:\...\README.md (lines 3-4)`，且没有自动发送。
+- 已在真实 DSH 页面中验证：新会话未发送消息时，Host 收到附件后输入框直接出现
+  `@C:\...\package.json (lines 1-5)`，且没有自动发送。
 - VS Code 当时没有运行，因此**右键菜单的实际渲染没有截图验证**；但扩展的 `package.json` 菜单贡献、命令注册、选区/文件参数计算和真实 HTTP 发送都已验证。
 
 测试过程中写入输入框的示例引用已经清空。
@@ -66,10 +67,10 @@
 
 ### 方式 A：用 npm tarball URL 直接安装（推荐）
 
-把 [`dist/local-dsh-vscode-bridge-1.0.2.tgz`](dist/local-dsh-vscode-bridge-1.0.2.tgz) 上传到 Gitee 仓库或 Release，取得可直接下载的 URL，然后让 DSH 执行：
+把 [`dist/local-dsh-vscode-bridge-1.0.4.tgz`](dist/local-dsh-vscode-bridge-1.0.4.tgz) 上传到 Gitee 仓库或 Release，取得可直接下载的 URL，然后让 DSH 执行：
 
 ```text
-plugin_manager install_bundle target="https://gitee.com/HYTWML/dsh-vscode-bridge/raw/master/dist/local-dsh-vscode-bridge-1.0.2.tgz"
+plugin_manager install_bundle target="https://gitee.com/HYTWML/dsh-vscode-bridge/raw/master/dist/local-dsh-vscode-bridge-1.0.4.tgz"
 ```
 
 也可以用 Gitee Release 附件的下载链接替换上面的 URL。这个文件是标准 npm tarball（根目录为 `package/`，内含 `package.json`、`cordis.patch.yml`、`index.js`、`client.js` 等），适合 DSH 的 tarball 安装。
@@ -89,7 +90,7 @@ plugin_manager install_bundle target="git+https://gitee.com/HYTWML/dsh-vscode-br
 
 ### 方式 C：下载 zip/tgz 后本地安装
 
-把 [`dist/dsh-vscode-bridge-1.0.2.zip`](dist/dsh-vscode-bridge-1.0.2.zip) 或 [`dist/dsh-vscode-bridge-1.0.2.tgz`](dist/dsh-vscode-bridge-1.0.2.tgz) 下载并解压，然后把解压出来的 `dsh-vscode-bridge` 目录作为 target：
+把 [`dist/dsh-vscode-bridge-1.0.4.zip`](dist/dsh-vscode-bridge-1.0.4.zip) 或 [`dist/dsh-vscode-bridge-1.0.4.tgz`](dist/dsh-vscode-bridge-1.0.4.tgz) 下载并解压，然后把解压出来的 `dsh-vscode-bridge` 目录作为 target：
 
 ```text
 plugin_manager install_bundle target="C:\path\to\dsh-vscode-bridge"
@@ -112,7 +113,7 @@ Invoke-WebRequest -UseBasicParsing `
 code --install-extension "$env:TEMP\dsh-vscode-bridge-1.0.0.vsix" --force
 ```
 
-> 当前机器已经安装的是工作区本地 link 版本。如果改成从 Gitee 安装同一个包，需要先 `remove_bundle` 当前的 `@local/dsh-vscode-bridge`，否则会报 `already-installed`。
+> 本机当前安装的是 `~/.dsh/bundles/local-dsh-vscode-bridge-1.0.4.tgz`。如果改成从 Gitee 安装同一个包，需要先 `remove_bundle` 当前的 `@local/dsh-vscode-bridge`，否则会报 `already-installed`。
 
 ## 工作原理
 

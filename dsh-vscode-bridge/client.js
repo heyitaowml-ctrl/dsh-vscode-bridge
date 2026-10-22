@@ -7,11 +7,19 @@ window.__ModuleLoader__.load({
     const MAX_SEEN = 200;
 
     /**
-     * Invisible dock occupant: it owns the SSE subscription for the current
-     * session and inserts incoming VSCode references at the live caret through
-     * the composer's InputActions. Returning null keeps the DSH UI unchanged.
+     * Invisible composer participant: it owns the SSE subscription for the
+     * current session and inserts incoming VSCode references at the live caret
+     * through the composer's InputActions. Returning null keeps the DSH UI
+     * unchanged.
+     *
+     * This is registered under `conversation.input.left` rather than
+     * `conversation.composer.dock`: the dock is rendered only when the
+     * composer variant is active, so a brand-new session (hero variant) would
+     * not subscribe until its first message and the Host could only queue the
+     * reference. The left tool slot renders in both variants and receives the
+     * same `sessionId`, `inputActions`, and `useInput` props.
      */
-    function VSCodeBridgeDock(props) {
+    function VSCodeBridgeSlot(props) {
       const sessionId = props.sessionId;
       const inputActions = props.inputActions;
       // The dock slot guarantees useInput; subscribing to the draft lets the
@@ -161,11 +169,11 @@ window.__ModuleLoader__.load({
     return {
       inject: ['slots'],
       apply(ctx) {
-        ctx.slots.inject('conversation.composer.dock', () => ctx.slots.register({
-          name: 'conversation.composer.dock',
+        ctx.slots.inject('conversation.input.left', () => ctx.slots.register({
+          name: 'conversation.input.left',
           id: 'vscode-bridge',
-          order: 40,
-        }, VSCodeBridgeDock));
+          order: 90,
+        }, VSCodeBridgeSlot));
       },
     };
   },
