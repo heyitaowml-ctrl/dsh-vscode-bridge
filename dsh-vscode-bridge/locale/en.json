@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "VSCode Bridge",
+    "description": "Send the selected code range or a file's absolute path from VSCode into the current DSH conversation."
+  }
+}

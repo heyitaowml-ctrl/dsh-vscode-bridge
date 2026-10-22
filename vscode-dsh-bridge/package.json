@@ -1,0 +1,111 @@
+{
+  "name": "dsh-vscode-bridge",
+  "displayName": "DSH VSCode Bridge",
+  "description": "Send selected code ranges or file paths from VS Code to the current DSH conversation.",
+  "version": "1.0.0",
+  "publisher": "local",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "dsh",
+    "deepseek",
+    "harness",
+    "ai",
+    "context"
+  ],
+  "main": "./extension.js",
+  "activationEvents": [
+    "onCommand:dsh.sendSelection",
+    "onCommand:dsh.sendFile",
+    "onCommand:dsh.showStatus",
+    "onCommand:dsh.openSettings"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "dsh.sendSelection",
+        "title": "发送选中代码到 DSH 对话",
+        "category": "DSH"
+      },
+      {
+        "command": "dsh.sendFile",
+        "title": "发送文件路径到 DSH 对话",
+        "category": "DSH"
+      },
+      {
+        "command": "dsh.showStatus",
+        "title": "显示 DSH 桥接状态",
+        "category": "DSH"
+      },
+      {
+        "command": "dsh.openSettings",
+        "title": "打开 DSH 桥接设置",
+        "category": "DSH"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "dsh.sendSelection",
+          "when": "editorHasSelection",
+          "group": "navigation@9"
+        },
+        {
+          "command": "dsh.sendFile",
+          "when": "!editorHasSelection",
+          "group": "navigation@9"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "dsh.sendFile",
+          "when": "resourceScheme == file",
+          "group": "navigation@9"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "dsh.sendSelection",
+          "when": "editorHasSelection"
+        },
+        {
+          "command": "dsh.sendFile"
+        },
+        {
+          "command": "dsh.showStatus"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "DSH Bridge",
+      "properties": {
+        "dsh.bridge.url": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "markdownDescription": "DSH 服务地址，例如 `http://127.0.0.1:52094`。留空时从 DSH 写入的桥接配置文件中读取。"
+        },
+        "dsh.bridge.token": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "markdownDescription": "桥接令牌。通常留空，让扩展从 `~/.dsh/vscode-bridge.json` 自动读取；只有调试时才需要手动填写。"
+        },
+        "dsh.bridge.tokenFile": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "markdownDescription": "DSH 桥接配置文件路径。留空时使用 `~/.dsh/vscode-bridge.json`；也可用环境变量 `DSH_VSCODE_BRIDGE_FILE` 覆盖。"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build:vsix": "powershell -NoProfile -ExecutionPolicy Bypass -File ../scripts/build-vsix.ps1"
+  }
+}

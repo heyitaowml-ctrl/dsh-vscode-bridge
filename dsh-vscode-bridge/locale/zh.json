@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "VSCode 桥接",
+    "description": "在 VSCode 中右键，将选中的代码范围或文件绝对路径发送到当前 DSH 对话。"
+  }
+}

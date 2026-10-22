@@ -1,0 +1,3 @@
+- insert:
+    - id: dsh-vscode-bridge
+      name: '@local/dsh-vscode-bridge'
