@@ -62,12 +62,14 @@
 
 ## 上传到 Gitee 后如何安装 DSH 端
 
+仓库地址：<https://gitee.com/HYTWML/dsh-vscode-bridge>
+
 ### 方式 A：用 npm tarball URL 直接安装（推荐）
 
 把 [`dist/local-dsh-vscode-bridge-1.0.2.tgz`](dist/local-dsh-vscode-bridge-1.0.2.tgz) 上传到 Gitee 仓库或 Release，取得可直接下载的 URL，然后让 DSH 执行：
 
 ```text
-plugin_manager install_bundle target="https://gitee.com/<用户名>/<仓库>/raw/<分支>/dist/local-dsh-vscode-bridge-1.0.2.tgz"
+plugin_manager install_bundle target="https://gitee.com/HYTWML/dsh-vscode-bridge/raw/master/dist/local-dsh-vscode-bridge-1.0.2.tgz"
 ```
 
 也可以用 Gitee Release 附件的下载链接替换上面的 URL。这个文件是标准 npm tarball（根目录为 `package/`，内含 `package.json`、`cordis.patch.yml`、`index.js`、`client.js` 等），适合 DSH 的 tarball 安装。
@@ -80,7 +82,7 @@ plugin_manager install_bundle target="https://gitee.com/<用户名>/<仓库>/raw
 仅当**仓库根目录就是 DSH bundle**（根目录有带 `dsh.bundle.patch` 的 `package.json`）时：
 
 ```text
-plugin_manager install_bundle target="git+https://gitee.com/<用户名>/<仓库>.git"
+plugin_manager install_bundle target="git+https://gitee.com/HYTWML/dsh-vscode-bridge.git"
 ```
 
 当前工作区的 bundle 位于 `dsh-vscode-bridge/` 子目录，因此直接对当前仓库根使用 Git URL 不会把子目录当成包；这种情况请使用方式 A，或单独建一个 bundle 根仓库。
@@ -95,10 +97,19 @@ plugin_manager install_bundle target="C:\path\to\dsh-vscode-bridge"
 
 ### VS Code 端
 
-从 Gitee 仓库或 Release 下载 [`dist/dsh-vscode-bridge-1.0.0.vsix`](dist/dsh-vscode-bridge-1.0.0.vsix)，然后：
+从 Gitee 下载：
+
+```text
+https://gitee.com/HYTWML/dsh-vscode-bridge/raw/master/dist/dsh-vscode-bridge-1.0.0.vsix
+```
+
+然后安装：
 
 ```powershell
-code --install-extension .\dsh-vscode-bridge-1.0.0.vsix --force
+Invoke-WebRequest -UseBasicParsing `
+  -Uri 'https://gitee.com/HYTWML/dsh-vscode-bridge/raw/master/dist/dsh-vscode-bridge-1.0.0.vsix' `
+  -OutFile "$env:TEMP\dsh-vscode-bridge-1.0.0.vsix"
+code --install-extension "$env:TEMP\dsh-vscode-bridge-1.0.0.vsix" --force
 ```
 
 > 当前机器已经安装的是工作区本地 link 版本。如果改成从 Gitee 安装同一个包，需要先 `remove_bundle` 当前的 `@local/dsh-vscode-bridge`，否则会报 `already-installed`。
