@@ -223,6 +223,15 @@ assert.equal(detected.extensionState, 'installed');
 assert.equal(detected.extensionKnown, true, 'a folder on disk counts as installed');
 assert.equal(detected.extensionVersion, '1.0.1');
 
+// A renamed leftover is not an installed extension: `…-1.0.1.bak` is exactly what
+// you get after moving the folder aside, and it must not mask the truth.
+const leftoverRoot = join(scratch, 'leftover');
+await mkdirp(join(leftoverRoot, 'heyitaowml.dsh-vscode-bridge-1.0.1.bak'), { recursive: true });
+const leftover = await healthWithRoots(leftoverRoot, 'leftover');
+console.log('leftover root:', JSON.stringify(leftover));
+assert.equal(leftover.extensionState, 'absent', 'a suffixed leftover does not count as installed');
+assert.equal(leftover.extensionKnown, false);
+
 const absent = await healthWithRoots(emptyRoot, 'absent');
 console.log('empty root:', JSON.stringify(absent));
 assert.equal(absent.extensionState, 'absent');

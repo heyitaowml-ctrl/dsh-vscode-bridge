@@ -33,7 +33,9 @@ const STATE_FILENAME = 'vscode-bridge-state.json';
 // How long a filesystem probe of the extension directory is reused.
 const DETECT_TTL_MS = 5_000;
 // `<publisher>.dsh-vscode-bridge-<version>` — the folder VS Code unpacks a VSIX into.
-const EXTENSION_DIR_PATTERN = /^.+\.dsh-vscode-bridge-(\d+\.\d+\.\d+)/u;
+// Anchored at the end on purpose: a renamed leftover (`…1.0.1.bak`), a `.disabled`
+// copy or an interrupted install must not count as an installed extension.
+const EXTENSION_DIR_PATTERN = /^.+\.dsh-vscode-bridge-(\d+\.\d+\.\d+)$/u;
 // `code` first: it is what both the Microsoft build and most forks put on PATH.
 // The other two cover Insiders and VSCodium users who have no plain `code`.
 const CLI_NAMES = ['code', 'code-insiders', 'codium'];
