@@ -66,6 +66,29 @@ window.__ModuleLoader__.load({
         }
       }, []);
 
+      // Re-probe the extension folder without reloading the page. Needed because a
+      // user can delete the extension in VS Code at any time; without this the pill
+      // would only come back on the next page load.
+      const recheck = React.useCallback(async () => {
+        try {
+          const response = await fetch('/dsh-vscode/health?refresh=1', {
+            cache: 'no-store',
+            credentials: 'same-origin',
+            headers: { accept: 'application/json' },
+          });
+          if (!response.ok) return;
+          const body = await response.json().catch(() => ({}));
+          if (body?.extensionKnown === true) {
+            setExtensionKnown(true);
+            setInstall({ phase: 'idle', message: '' });
+          } else if (body?.extensionKnown === false) {
+            setExtensionKnown(false);
+          }
+        } catch {
+          // A failed recheck just leaves the pill as it was.
+        }
+      }, []);
+
       const queueRef = React.useRef([]);
       const seenRef = React.useRef(new Set());
       const timerRef = React.useRef(null);
@@ -288,6 +311,20 @@ window.__ModuleLoader__.load({
             },
           },
           '一键安装',
+        ),
+        (phase === 'idle' || phase === 'failed') && React.createElement(
+          'button',
+          {
+            type: 'button',
+            style: buttonStyle,
+            title: '重新检查扩展是否还在（不刷新页面）',
+            onClick: (event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              void recheck();
+            },
+          },
+          '重新检测',
         ),
         (phase === 'idle' || phase === 'failed') && React.createElement(
           'a',

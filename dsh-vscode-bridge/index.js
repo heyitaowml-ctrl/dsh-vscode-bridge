@@ -1,5 +1,5 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -30,6 +30,10 @@ const INSTALL_OUTPUT_MAX = 2_000;
 // Remembers, across DSH restarts, that this machine has the extension. Lives next
 // to vscode-bridge.json so a profile reset wipes both together.
 const STATE_FILENAME = 'vscode-bridge-state.json';
+// How long a filesystem probe of the extension directory is reused.
+const DETECT_TTL_MS = 5_000;
+// `<publisher>.dsh-vscode-bridge-<version>` — the folder VS Code unpacks a VSIX into.
+const EXTENSION_DIR_PATTERN = /^.+\.dsh-vscode-bridge-(\d+\.\d+\.\d+)/u;
 // `code` first: it is what both the Microsoft build and most forks put on PATH.
 // The other two cover Insiders and VSCodium users who have no plain `code`.
 const CLI_NAMES = ['code', 'code-insiders', 'codium'];
@@ -84,6 +88,52 @@ function bridgeFilePath() {
 /** Sidecar state file; overridable so tests can stay isolated. */
 function bridgeStateFile(bridgeFile) {
   return process.env.DSH_VSCODE_BRIDGE_STATE || join(dirname(bridgeFile), STATE_FILENAME);
+}
+
+/** Extension directories to inspect, in order. Override for other editors/tests. */
+function extensionRoots(home = homedir(), env = process.env) {
+  const override = env.DSH_VSCODE_EXTENSION_DIRS;
+  if (typeof override === 'string' && override.trim() !== '') {
+    return override.split(/[;,]/u).map((entry) => entry.trim()).filter((entry) => entry !== '');
+  }
+  return [
+    join(home, '.vscode', 'extensions'),
+    join(home, '.vscode-insiders', 'extensions'),
+    join(home, '.vscode-oss', 'extensions'),
+    join(home, '.cursor', 'extensions'),
+    join(home, '.windsurf', 'extensions'),
+  ];
+}
+
+/**
+ * Look for the unpacked extension on disk.
+ *
+ * Three outcomes, because "not found" is only trustworthy when we actually had a
+ * place to look:
+ *   installed — a matching folder exists
+ *   absent    — at least one editor extension directory exists and none matched
+ *   unknown   — no editor directory exists at all (or the scan failed), so the
+ *               caller must fall back to remembered state instead of guessing
+ */
+function detectExtension(roots = extensionRoots()) {
+  let looked = 0;
+  for (const root of roots) {
+    let entries;
+    try {
+      entries = readdirSync(root, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    looked += 1;
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const match = EXTENSION_DIR_PATTERN.exec(entry.name);
+      if (match !== null) {
+        return { state: 'installed', root, path: join(root, entry.name), version: match[1] };
+      }
+    }
+  }
+  return { state: looked > 0 ? 'absent' : 'unknown' };
 }
 
 /** Directory of this package — where the bundled VSIX lives. */
@@ -307,7 +357,37 @@ export function apply(ctx) {
     // No state file yet (or it is unreadable): the extension is unknown.
   }
 
-  const extensionKnown = () => extensionSeenAt !== undefined || extensionInstalledAt !== undefined;
+  // Probe results are cached briefly: detection reads a directory, and both
+  // /health and every SSE hello ask for the answer.
+  let detected;
+  let detectedAt = 0;
+  const currentExtension = (force = false) => {
+    const now = Date.now();
+    if (!force && detected !== undefined && now - detectedAt < DETECT_TTL_MS) return detected;
+    detected = detectExtension();
+    detectedAt = now;
+    return detected;
+  };
+
+  /**
+   * Whether the extension should be considered present.
+   *
+   * Order matters. A reference that arrived in this very session is proof; then a
+   * filesystem hit; then absence — which is only trustworthy when there was an
+   * editor directory to look in; and only then the remembered state, for editors
+   * whose layout we do not know.
+   *
+   * Checking `sequence` first keeps a working extension visible if a probe fails;
+   * checking `absent` before the state file is what makes deleting the extension
+   * bring the hint back instead of staying silent forever.
+   */
+  const extensionKnown = (force = false) => {
+    if (sequence > 0) return true;
+    const probe = currentExtension(force);
+    if (probe.state === 'installed') return true;
+    if (probe.state === 'absent') return false;
+    return extensionSeenAt !== undefined || extensionInstalledAt !== undefined;
+  };
 
   const persistState = () => {
     const payload = JSON.stringify({
@@ -580,13 +660,19 @@ export function apply(ctx) {
     info(`SSE client ${client.id} connected for session ${sessionId ?? '(unknown)'}`);
 
     try {
+      // Force a fresh probe: each page load is exactly when a freshly uninstalled
+      // (or reinstalled) extension should be noticed.
+      const probe = currentExtension(true);
       res.write(`event: hello\ndata: ${JSON.stringify({
         connected: true,
         sessionId: sessionId ?? null,
         queued: queue.length,
         attachments: sequence,
         lastAttachAt: lastAttachAt ?? null,
-        extensionKnown: extensionKnown(),
+        extensionKnown: extensionKnown(true),
+        extensionState: probe.state,
+        extensionPath: probe.path ?? null,
+        extensionVersion: probe.version ?? null,
         extensionSeenAt: extensionSeenAt ?? null,
         extensionInstalledAt: extensionInstalledAt ?? null,
       })}\n\n`);
@@ -652,6 +738,14 @@ export function apply(ctx) {
       return;
     }
     void publishBridgeFile();
+    // ?refresh=1 skips the probe cache, so the UI's 重新检测 button gets a real answer.
+    let force = false;
+    try {
+      force = new URL(req.url ?? '/', 'http://localhost').searchParams.get('refresh') === '1';
+    } catch {
+      // A malformed query is not worth rejecting the whole request for.
+    }
+    const probe = currentExtension(force);
     sendJson(res, 200, {
       ok: true,
       version: 1,
@@ -661,7 +755,10 @@ export function apply(ctx) {
       configFetches,
       attachments: sequence,
       lastAttachAt: lastAttachAt ?? null,
-      extensionKnown: extensionKnown(),
+      extensionKnown: extensionKnown(force),
+      extensionState: probe.state,
+      extensionPath: probe.path ?? null,
+      extensionVersion: probe.version ?? null,
       extensionSeenAt: extensionSeenAt ?? null,
       extensionInstalledAt: extensionInstalledAt ?? null,
     });
@@ -757,11 +854,15 @@ export function apply(ctx) {
       const stdout = clamp(handle.collected?.stdout?.readFrom(0)?.text ?? '');
       const stderr = clamp(handle.collected?.stderr?.readFrom(0)?.text ?? '');
       const ok = outcome?.exitCode === 0;
-      if (ok && extensionInstalledAt === undefined) {
-        // The install itself is proof enough that the machine has the extension,
-        // so the hint does not come back on the next launch.
-        extensionInstalledAt = new Date().toISOString();
-        persistState();
+      if (ok) {
+        // Drop the cached probe so the next hello/health sees the new folder, and
+        // remember the install in case this editor lives outside the roots we scan.
+        detected = undefined;
+        detectedAt = 0;
+        if (extensionInstalledAt === undefined) {
+          extensionInstalledAt = new Date().toISOString();
+          persistState();
+        }
       }
       info(`one-click install ${ok ? 'succeeded' : 'failed'} via ${cli} (exit ${String(outcome?.exitCode ?? null)})`);
       sendJson(res, 200, {

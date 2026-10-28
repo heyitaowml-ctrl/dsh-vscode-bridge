@@ -39,21 +39,30 @@ there is no token to copy by hand.
 
 ### Finding out whether the extension is installed
 
-If this machine has never had the extension, the composer shows a red
-`⚠ VS Code 扩展未安装` pill with a **一键安装** button. It disappears as soon as either
+When the extension is missing, the composer shows a red `⚠ VS Code 扩展未安装` pill with
+**一键安装**, **重新检测** and **手动** actions. It disappears once the extension is present.
 
-- the one-click install succeeds, or
-- the extension delivers its first reference,
+**Presence is decided by looking, not by remembering.** On every page load and on every
+`/health?refresh=1` the Host scans the editor extension directories for
+`<publisher>.dsh-vscode-bridge-<version>`, and there are three outcomes:
 
-and it does **not** come back on later launches: the Host records the fact in
-`vscode-bridge-state.json` next to `vscode-bridge.json` (override the path with
-`DSH_VSCODE_BRIDGE_STATE`). Counting references alone would not work — that counter starts at
-zero on every DSH start, which made the pill reappear on every launch even with the extension
-installed and working.
+| Probe | Meaning | Pill |
+| --- | --- | --- |
+| `installed` | a matching folder exists | hidden |
+| `absent` | an editor extensions directory exists and nothing matched | **shown** |
+| `unknown` | no editor directory exists at all (or it is unreadable) | falls back to remembered state |
 
-The `×` hides it for the current page. If VS Code is not installed at all, or its `code`
-command cannot be found, the pill stays red and names the reason, with a link to the manual
-steps.
+That distinction is deliberate: "not found" is only trustworthy when there was somewhere to
+look. On a layout the Host cannot recognise it defers to `vscode-bridge-state.json` (next to
+`vscode-bridge.json`; override the paths with `DSH_VSCODE_BRIDGE_STATE` and
+`DSH_VSCODE_EXTENSION_DIRS`) instead of guessing.
+
+So if you delete the extension in VS Code, DSH notices on the next page load and offers to
+reinstall — that is what the pill is for. Earlier versions recorded "installed" forever and
+went silent after a manual uninstall; counting references was worse still, because that
+counter starts at zero on every DSH start.
+
+Editing `vscode-bridge-state.json` by hand is safe: a UTF-8 BOM is stripped before parsing.
 
 ## Usage
 

@@ -10,6 +10,10 @@ process.env.DSH_VSCODE_BRIDGE_FILE = bridgeFile;
 // Keep the sidecar state file beside it and unique to this run, so a previous
 // run can never make the "fresh Host" assertions pass or fail by accident.
 process.env.DSH_VSCODE_BRIDGE_STATE = join(tmpdir(), `dsh-vscode-state-${process.pid}.json`);
+// Point detection at a path that cannot exist, so these early assertions describe
+// the plugin's own bookkeeping rather than whatever is installed on this machine.
+// The detection cases further down set this to real temporary directories.
+process.env.DSH_VSCODE_EXTENSION_DIRS = join(tmpdir(), `dsh-vscode-absent-${process.pid}`);
 
 function makeCtx() {
   const routes = new Map();
@@ -192,4 +196,45 @@ console.log('after BOM-prefixed state:', JSON.stringify(bomRestarted));
 assert.equal(bomRestarted.extensionKnown, true, 'a BOM-prefixed state file is still understood');
 
 console.log('\nPASS: state file tolerates a UTF-8 BOM');
+
+// 7. Detection. A folder on disk is proof the extension is there, and its absence
+//    must override the remembered state — otherwise deleting the extension in
+//    VS Code leaves DSH silent forever, which was the reported bug.
+const { mkdir: mkdirp, mkdtemp, rm: rmrf } = await import('node:fs/promises');
+
+const scratch = await mkdtemp(join(tmpdir(), 'dsh-vscode-ext-'));
+const installedRoot = join(scratch, 'installed');
+const emptyRoot = join(scratch, 'empty');
+const missingRoot = join(scratch, 'nope');
+await mkdirp(join(installedRoot, 'heyitaowml.dsh-vscode-bridge-1.0.1'), { recursive: true });
+await mkdirp(emptyRoot, { recursive: true });
+
+async function healthWithRoots(dirs, tag) {
+  process.env.DSH_VSCODE_EXTENSION_DIRS = dirs;
+  const instance = makeCtx();
+  const mod = await import(new URL('../dsh-vscode-bridge/index.js', import.meta.url).href + `?detect=${tag}`);
+  mod.apply(instance.ctx);
+  return callHealth(instance.routes);
+}
+
+const detected = await healthWithRoots(installedRoot, 'installed');
+console.log('installed root:', JSON.stringify(detected));
+assert.equal(detected.extensionState, 'installed');
+assert.equal(detected.extensionKnown, true, 'a folder on disk counts as installed');
+assert.equal(detected.extensionVersion, '1.0.1');
+
+const absent = await healthWithRoots(emptyRoot, 'absent');
+console.log('empty root:', JSON.stringify(absent));
+assert.equal(absent.extensionState, 'absent');
+assert.equal(absent.extensionKnown, false, 'absence beats the remembered state');
+
+const unknown = await healthWithRoots(missingRoot, 'unknown');
+console.log('missing root:', JSON.stringify(unknown));
+assert.equal(unknown.extensionState, 'unknown');
+assert.equal(unknown.extensionKnown, true, 'an unreadable editor layout falls back to the state file');
+
+delete process.env.DSH_VSCODE_EXTENSION_DIRS;
+await rmrf(scratch, { recursive: true, force: true });
+
+console.log('\nPASS: extension presence is detected on disk and beats stale state');
 process.exit(0);
