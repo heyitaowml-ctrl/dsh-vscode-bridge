@@ -17,7 +17,11 @@ reference, inserted at the composer caret. It does **not** send the message for 
 dsh plugin --profile <profile> add dsh-vscode-bridge-he
 ```
 
-**2 · VS Code half** — pick one:
+**2 · VS Code half** — easiest is the **一键安装** button next to the
+`⚠ VS Code 未连接` pill in the composer: the Host runs `code --install-extension` against the
+VSIX bundled in this package, so nothing is downloaded. It only runs when you click, and it
+needs a `code` CLI it can find (PATH first, then the usual install locations for Windows,
+macOS and Linux); if it cannot find one it says so and you install manually:
 
 - **Extensions view:** open VS Code → Extensions → `…` → **Install from VSIX…** → choose
   [`dist/dsh-vscode-bridge.vsix`](https://github.com/heyitaowml-ctrl/dsh-vscode-bridge/raw/master/dist/dsh-vscode-bridge.vsix)
@@ -81,6 +85,7 @@ browser session that connects.
 | GET | `/dsh-vscode/events` | `token` + `channel` query | SSE stream consumed by the browser half |
 | GET | `/dsh-vscode/config` | same-origin page | Supplies the browser half with the current token/channel |
 | GET | `/dsh-vscode/health` | none | Connection, queue and `attachments` count for the status command |
+| POST | `/dsh-vscode/install-extension` | same-origin page only | One-click install of the bundled VSIX via the local `code` CLI |
 
 `/health` and the SSE `hello` frame both report `attachments` (how many references the
 extension has ever sent to this Host instance) and `lastAttachAt`. That pair drives the

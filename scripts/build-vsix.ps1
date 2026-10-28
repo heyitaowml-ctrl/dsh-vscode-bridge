@@ -40,6 +40,12 @@ try {
     npx --yes @vscode/vsce package --githubBranch master --out $vsix
     if ($LASTEXITCODE -ne 0) { throw "vsce package failed with exit code $LASTEXITCODE" }
     Write-Output ("Built {0} ({1} bytes)" -f $vsix, (Get-Item -LiteralPath $vsix).Length)
+
+    # The DSH package carries a copy so `dsh plugin add` can offer a one-click
+    # install with no network fetch. Keep the two from drifting.
+    $bundled = Join-Path $root 'dsh-vscode-bridge\dsh-vscode-bridge.vsix'
+    Copy-Item -LiteralPath $vsix -Destination $bundled -Force
+    Write-Output ("Synced {0}" -f $bundled)
   }
 } finally {
   Pop-Location

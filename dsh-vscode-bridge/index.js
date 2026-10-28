@@ -1,7 +1,8 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto';
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 /**
  * DSH VSCode Bridge (Host half).
@@ -21,6 +22,48 @@ const HEARTBEAT_MS = 20_000;
 const PUBLISH_RETRY_MS = 100;
 const PUBLISH_MAX_ATTEMPTS = 100;
 
+// The VSIX that ships inside this npm package, used by the one-click install.
+const VSIX_FILENAME = 'dsh-vscode-bridge.vsix';
+const INSTALL_TIMEOUT_MS = 60_000;
+const INSTALL_OUTPUT_MAX = 2_000;
+// `code` first: it is what both the Microsoft build and most forks put on PATH.
+// The other two cover Insiders and VSCodium users who have no plain `code`.
+const CLI_NAMES = ['code', 'code-insiders', 'codium'];
+
+/**
+ * Absolute fallbacks for the CLI when it is not on PATH. A portable or custom
+ * install (for example C:\_User\APPs\Microsoft VS Code) is invisible to us, which
+ * is exactly why PATH is tried first and this list is only a net.
+ */
+function cliCandidates(platform = process.platform, env = process.env) {
+  if (platform === 'win32') {
+    const out = [];
+    const push = (base, ...rest) => {
+      if (typeof base === 'string' && base !== '') out.push(join(base, ...rest));
+    };
+    push(env.LOCALAPPDATA, 'Programs', 'Microsoft VS Code', 'bin', 'code.cmd');
+    push(env.LOCALAPPDATA, 'Programs', 'Microsoft VS Code Insiders', 'bin', 'code-insiders.cmd');
+    push(env.ProgramFiles, 'Microsoft VS Code', 'bin', 'code.cmd');
+    push(env['ProgramFiles(x86)'], 'Microsoft VS Code', 'bin', 'code.cmd');
+    push(env.ProgramFiles, 'Microsoft VS Code Insiders', 'bin', 'code-insiders.cmd');
+    return out;
+  }
+  if (platform === 'darwin') {
+    return [
+      '/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code',
+      '/Applications/Visual Studio Code - Insiders.app/Contents/Resources/app/bin/code',
+      join(homedir(), 'Applications', 'Visual Studio Code.app', 'Contents', 'Resources', 'app', 'bin', 'code'),
+    ];
+  }
+  return [
+    '/usr/bin/code',
+    '/usr/local/bin/code',
+    '/snap/bin/code',
+    '/usr/share/code/bin/code',
+    '/var/lib/flatpak/exports/bin/com.visualstudio.code',
+  ];
+}
+
 const EDITOR_REFERENCES_PROMPT = [
   '## VSCode references',
   'A message may contain a reference added from VSCode, written as `@<absolute path>` or',
@@ -32,6 +75,42 @@ const EDITOR_REFERENCES_PROMPT = [
 
 function bridgeFilePath() {
   return process.env.DSH_VSCODE_BRIDGE_FILE || join(homedir(), '.dsh', 'vscode-bridge.json');
+}
+
+/** Directory of this package — where the bundled VSIX lives. */
+const packageDir = () => dirname(fileURLToPath(import.meta.url));
+
+/** Keep CLI output small enough to travel in a JSON response. */
+const clamp = (text) => {
+  if (typeof text !== 'string') return '';
+  return text.length > INSTALL_OUTPUT_MAX ? `${text.slice(0, INSTALL_OUTPUT_MAX)}…` : text;
+};
+
+/**
+ * Find a VS Code CLI. The Host's own executable resolution comes first because it
+ * knows the scrubbed PATH the rest of DSH uses; the absolute candidates are only a
+ * fallback for installs that never put `code` on PATH.
+ */
+async function resolveCli(subprocess) {
+  if (typeof subprocess?.resolveExecutable === 'function') {
+    for (const name of CLI_NAMES) {
+      try {
+        const found = await subprocess.resolveExecutable(name);
+        if (typeof found === 'string' && found !== '') return found;
+      } catch {
+        // Not resolvable here; try the next name.
+      }
+    }
+  }
+  for (const candidate of cliCandidates()) {
+    try {
+      const info = await stat(candidate);
+      if (info.isFile()) return candidate;
+    } catch {
+      // Absent; keep probing.
+    }
+  }
+  return undefined;
 }
 
 function tokenMatches(expected, candidate) {
@@ -213,6 +292,7 @@ export function apply(ctx) {
   let publishTimer;
   let disposed = false;
   let configFetches = 0;
+  let installing = false;
 
   const info = (...args) => {
     try {
@@ -482,11 +562,13 @@ export function apply(ctx) {
     res.on('error', cleanup);
   };
 
-  const handleConfig = (req, res) => {
-    if (req.method !== 'GET') {
-      sendJson(res, 405, { ok: false, error: 'method_not_allowed' });
-      return;
-    }
+  /**
+   * True for requests the DSH page itself makes: same origin, or the Desktop
+   * protocol handler forwarding with the Host-issued authentication cookie.
+   * The Desktop renderer uses the dsh-app:// scheme and strips Origin and
+   * Sec-Fetch-Site, so the cookie is the only evidence left.
+   */
+  const trustedPageRequest = (req) => {
     const expected = origin();
     const originHeader = req.headers.origin;
     const referer = req.headers.referer;
@@ -495,13 +577,18 @@ export function apply(ctx) {
       && (originHeader === expected
         || (typeof referer === 'string' && (referer === expected || referer.startsWith(`${expected}/`)))
         || site === 'same-origin');
-    // The Desktop renderer uses the dsh-app:// scheme. Its protocol handler
-    // forwards every non-asset request to this server with the Host-issued
-    // authentication cookie, but strips Origin and Sec-Fetch-Site.
     const desktopForwarded = typeof req.headers.cookie === 'string'
       && req.headers.cookie !== ''
       && (typeof referer === 'string' ? referer.startsWith('dsh-app://app/') : true);
-    if (!sameOrigin && !desktopForwarded) {
+    return sameOrigin || desktopForwarded;
+  };
+
+  const handleConfig = (req, res) => {
+    if (req.method !== 'GET') {
+      sendJson(res, 405, { ok: false, error: 'method_not_allowed' });
+      return;
+    }
+    if (!trustedPageRequest(req)) {
       sendJson(res, 403, { ok: false, error: 'forbidden' });
       return;
     }
@@ -527,12 +614,145 @@ export function apply(ctx) {
     });
   };
 
+  /**
+   * One-click install of the companion VS Code extension.
+   *
+   * Deliberately POST + page-trust only: this runs a local binary, so it must
+   * never be reachable from another origin, and it never runs unless the user
+   * clicked a button (no install-time side effects, which every plugin review
+   * treats as a red flag).
+   */
+  const handleInstallExtension = async (req, res) => {
+    if (req.method !== 'POST') {
+      sendJson(res, 405, { ok: false, code: 'method_not_allowed' });
+      return;
+    }
+    if (!trustedPageRequest(req)) {
+      sendJson(res, 403, { ok: false, code: 'forbidden' });
+      return;
+    }
+    if (installing) {
+      sendJson(res, 409, { ok: false, code: 'already_running' });
+      return;
+    }
+
+    const vsix = join(packageDir(), VSIX_FILENAME);
+    try {
+      const info = await stat(vsix);
+      if (!info.isFile()) throw new Error('not a file');
+    } catch {
+      sendJson(res, 200, {
+        ok: false,
+        code: 'vsix_missing',
+        message: `this package is missing its bundled VSIX (${VSIX_FILENAME}); install the extension manually`,
+      });
+      return;
+    }
+
+    const subprocess = (() => {
+      try {
+        return typeof ctx.get === 'function' ? ctx.get('subprocess') : ctx.subprocess;
+      } catch {
+        return undefined;
+      }
+    })();
+
+    const cli = await resolveCli(subprocess);
+    if (cli === undefined) {
+      sendJson(res, 200, {
+        ok: false,
+        code: 'cli_not_found',
+        message: 'no VS Code command line found; install the extension manually or add `code` to PATH',
+        tried: [...CLI_NAMES, ...cliCandidates()],
+      });
+      return;
+    }
+
+    if (typeof subprocess?.spawn !== 'function') {
+      sendJson(res, 200, {
+        ok: false,
+        code: 'spawn_unavailable',
+        cli,
+        message: 'this Host does not expose the subprocess service; install the extension manually',
+      });
+      return;
+    }
+
+    // A .cmd/.bat shim cannot be executed directly: Windows needs cmd.exe /c.
+    const needsShell = process.platform === 'win32' && /\.(cmd|bat)$/iu.test(cli);
+    const argv = needsShell
+      ? [process.env.ComSpec ?? 'cmd.exe', '/c', cli, '--install-extension', vsix, '--force']
+      : [cli, '--install-extension', vsix, '--force'];
+
+    installing = true;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), INSTALL_TIMEOUT_MS);
+    timer.unref?.();
+    try {
+      const handle = subprocess.spawn({
+        argv,
+        cwd: packageDir(),
+        stdio: {
+          stdin: 'ignore',
+          stdout: { maxBytes: 64 * 1024 },
+          stderr: { maxBytes: 64 * 1024 },
+        },
+        graceMs: 5_000,
+        signal: controller.signal,
+      });
+      const outcome = await handle.done;
+      const stdout = clamp(handle.collected?.stdout?.readFrom(0)?.text ?? '');
+      const stderr = clamp(handle.collected?.stderr?.readFrom(0)?.text ?? '');
+      const ok = outcome?.exitCode === 0;
+      info(`one-click install ${ok ? 'succeeded' : 'failed'} via ${cli} (exit ${String(outcome?.exitCode ?? null)})`);
+      sendJson(res, 200, {
+        ok,
+        code: ok ? 'installed' : 'install_failed',
+        cli,
+        exitCode: outcome?.exitCode ?? null,
+        stdout,
+        stderr,
+        message: ok
+          ? 'installed — reload the VS Code window to pick up the DSH commands'
+          : '`code --install-extension` returned a non-zero exit code',
+      });
+    } catch (error) {
+      const aborted = controller.signal.aborted;
+      warn(`one-click install failed: ${error instanceof Error ? error.message : String(error)}`);
+      sendJson(res, 200, {
+        ok: false,
+        code: aborted ? 'timeout' : 'spawn_failed',
+        cli,
+        message: aborted
+          ? `giving up after ${INSTALL_TIMEOUT_MS} ms`
+          : error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      clearTimeout(timer);
+      installing = false;
+    }
+  };
+
   ctx.effect(() => {
     const disposers = [
       ctx.webServer.register({ kind: 'exact', path: `${ROUTE_PREFIX}/attach`, handler: handleAttach }),
       ctx.webServer.register({ kind: 'exact', path: `${ROUTE_PREFIX}/events`, handler: handleEvents }),
       ctx.webServer.register({ kind: 'exact', path: `${ROUTE_PREFIX}/config`, handler: handleConfig }),
       ctx.webServer.register({ kind: 'exact', path: `${ROUTE_PREFIX}/health`, handler: handleHealth }),
+      ctx.webServer.register({
+        kind: 'exact',
+        path: `${ROUTE_PREFIX}/install-extension`,
+        handler: (req, res) => {
+          void handleInstallExtension(req, res).catch((error) => {
+            warn(`install route failed: ${error instanceof Error ? error.message : String(error)}`);
+            try {
+              sendJson(res, 500, { ok: false, code: 'internal_error' });
+            } catch {
+              // The response may already be gone.
+            }
+          });
+        },
+      }),
       ctx.webServer.tapIndex((html) => injectBridgeConfig(html, token, channel)),
     ];
     return () => {

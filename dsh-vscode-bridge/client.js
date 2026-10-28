@@ -35,6 +35,30 @@ window.__ModuleLoader__.load({
       // 未连接 (not connected) rather than 未安装 (not installed).
       const [attachments, setAttachments] = React.useState(null);
       const [dismissed, setDismissed] = React.useState(false);
+      // idle → installing → done | failed. `failed` keeps the manual link visible.
+      const [install, setInstall] = React.useState({ phase: 'idle', message: '' });
+
+      const installExtension = React.useCallback(async () => {
+        setInstall({ phase: 'installing', message: '' });
+        try {
+          const response = await fetch('/dsh-vscode/install-extension', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { accept: 'application/json' },
+          });
+          const body = await response.json().catch(() => ({}));
+          if (response.ok && body.ok === true) {
+            setInstall({ phase: 'done', message: '' });
+            return;
+          }
+          setInstall({
+            phase: 'failed',
+            message: String(body?.message ?? body?.code ?? `HTTP ${response.status}`),
+          });
+        } catch (error) {
+          setInstall({ phase: 'failed', message: error instanceof Error ? error.message : String(error) });
+        }
+      }, []);
 
       const queueRef = React.useRef([]);
       const seenRef = React.useRef(new Set());
@@ -182,8 +206,31 @@ window.__ModuleLoader__.load({
 
       if (dismissed || attachments === null || attachments > 0) return null;
 
-      // Small, theme-neutral pill: it inherits the surrounding text colour and
-      // only lowers its own opacity, so it stays readable in light and dark.
+      const phase = install.phase;
+      const label = phase === 'installing'
+        ? '正在安装 VS Code 扩展…'
+        : phase === 'done'
+          ? '已安装，请重载 VS Code 窗口'
+          : phase === 'failed'
+            ? `安装失败：${install.message}`
+            : '⚠ VS Code 未连接';
+
+      const hint = phase === 'done'
+        ? '扩展已装好。在 VS Code 里执行 Developer: Reload Window 后，右键菜单就会出现 DSH 命令。'
+        : '还没收到过 VS Code 扩展发来的引用。可以点「一键安装」把随包附带的 VSIX 装进本机 VS Code，或手动安装。';
+
+      const buttonStyle = {
+        border: 'none',
+        background: 'transparent',
+        color: 'inherit',
+        cursor: 'pointer',
+        font: 'inherit',
+        padding: '0 4px',
+        textDecoration: 'underline',
+      };
+
+      // Small, theme-neutral pill: it inherits the surrounding colour and only
+      // lowers its own opacity, so it stays readable in light and dark themes.
       return React.createElement(
         'span',
         {
@@ -191,28 +238,46 @@ window.__ModuleLoader__.load({
             display: 'inline-flex',
             alignItems: 'center',
             gap: 2,
-            height: 22,
+            minHeight: 22,
             padding: '0 2px 0 8px',
             marginRight: 4,
             fontSize: 11,
             lineHeight: '22px',
             borderRadius: 999,
             border: '1px solid currentColor',
-            opacity: 0.6,
+            opacity: 0.7,
             whiteSpace: 'nowrap',
+            maxWidth: 520,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
           },
+          title: hint,
         },
-        React.createElement(
+        React.createElement('span', { style: { paddingRight: 2 } }, label),
+        phase === 'idle' && React.createElement(
+          'button',
+          {
+            type: 'button',
+            style: buttonStyle,
+            title: '把随包附带的 VSIX 安装到本机 VS Code',
+            onClick: (event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              void installExtension();
+            },
+          },
+          '一键安装',
+        ),
+        (phase === 'idle' || phase === 'failed') && React.createElement(
           'a',
           {
             href: INSTALL_DOC_URL,
             target: '_blank',
             rel: 'noreferrer noopener',
-            title: '还没收到过 VS Code 扩展发来的引用。没装过就点这里看安装步骤；装过的话，请在 VS Code 里执行 Developer: Reload Window。',
-            style: { color: 'inherit', textDecoration: 'none', cursor: 'pointer' },
+            style: { color: 'inherit', cursor: 'pointer', padding: '0 4px' },
             onClick: (event) => event.stopPropagation(),
           },
-          '⚠ VS Code 未连接',
+          '手动',
         ),
         React.createElement(
           'button',

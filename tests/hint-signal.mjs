@@ -112,4 +112,41 @@ assert.equal(hello.attachments, 1, 'hello reports attachments');
 assert.ok(hello.lastAttachAt, 'hello reports lastAttachAt');
 
 console.log('\nPASS: host half reports extension connectivity');
+
+// 4. The one-click install route must refuse untrusted callers, and must fail
+//    gracefully (never throw) when it cannot find a VS Code CLI.
+assert.ok(routes.has('/dsh-vscode/install-extension'), 'install route registered');
+
+function callInstall(headers) {
+  const res = fakeRes();
+  routes.get('/dsh-vscode/install-extension')(
+    { method: 'POST', url: '/dsh-vscode/install-extension', headers, on() { return this; } },
+    res,
+  );
+  return res;
+}
+
+async function settled(res) {
+  for (let i = 0; i < 100; i += 1) {
+    if (res.writableEnded) return JSON.parse(res.chunks.join(''));
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  throw new Error('install route did not answer in time');
+}
+
+const untrusted = callInstall({});
+await settled(untrusted);
+assert.equal(untrusted.statusCode, 403, 'install route rejects a request with no page trust');
+console.log('untrusted install -> 403');
+
+const trusted = callInstall({ 'sec-fetch-site': 'same-origin' });
+const trustedBody = await settled(trusted);
+assert.equal(trustedBody.ok, false, 'install reports failure instead of throwing');
+assert.ok(
+  ['cli_not_found', 'vsix_missing', 'spawn_unavailable'].includes(trustedBody.code),
+  `unexpected failure code: ${trustedBody.code}`,
+);
+console.log('trusted install ->', trustedBody.code);
+
+console.log('\nPASS: one-click install endpoint is gated and fails gracefully');
 process.exit(0);
