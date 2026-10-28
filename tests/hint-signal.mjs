@@ -177,4 +177,19 @@ assert.equal(restarted.attachments, 0, 'a restarted Host starts with 0 attachmen
 assert.equal(restarted.extensionKnown, true, 'a restarted Host still knows the extension (no pill on launch)');
 
 console.log('\nPASS: extension knowledge survives a Host restart');
+
+// 6. Regression: a Windows editor writes this file with a UTF-8 BOM, and
+//    JSON.parse rejects it — which silently read as "extension unknown" and
+//    brought the pill back. The Host must strip the BOM.
+const { writeFile } = await import('node:fs/promises');
+await writeFile(stateFile, `\uFEFF${JSON.stringify({ extensionSeenAt: state.extensionSeenAt })}`, 'utf8');
+
+const third = makeCtx();
+const mod3 = await import(new URL('../dsh-vscode-bridge/index.js', import.meta.url).href + '?bom=1');
+mod3.apply(third.ctx);
+const bomRestarted = callHealth(third.routes);
+console.log('after BOM-prefixed state:', JSON.stringify(bomRestarted));
+assert.equal(bomRestarted.extensionKnown, true, 'a BOM-prefixed state file is still understood');
+
+console.log('\nPASS: state file tolerates a UTF-8 BOM');
 process.exit(0);

@@ -298,7 +298,9 @@ export function apply(ctx) {
   let extensionSeenAt;
   let extensionInstalledAt;
   try {
-    const state = JSON.parse(readFileSync(stateFile, 'utf8'));
+    // Strip a leading BOM: Windows editors add one, and JSON.parse rejects it.
+    // Without this a hand-edited state file silently reads as "no extension".
+    const state = JSON.parse(readFileSync(stateFile, 'utf8').replace(/^\uFEFF/u, ''));
     if (typeof state?.extensionSeenAt === 'string') extensionSeenAt = state.extensionSeenAt;
     if (typeof state?.extensionInstalledAt === 'string') extensionInstalledAt = state.extensionInstalledAt;
   } catch {
