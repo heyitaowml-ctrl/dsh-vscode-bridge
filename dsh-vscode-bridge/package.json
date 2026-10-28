@@ -1,5 +1,5 @@
 {
-  "name": "dsh-vscode-ref",
+  "name": "dsh-vscode-bridge-he",
   "version": "1.0.4",
   "type": "module",
   "description": "Send a VS Code selection or file path into the open DSH conversation as an @path reference, without sending the message.",

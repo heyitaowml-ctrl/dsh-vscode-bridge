@@ -4,8 +4,8 @@
 
 > **English** — Right-click a selection or a file in VS Code and it lands in the open DSH
 > conversation as an `@path` reference with its line range, at the composer caret. Nothing is
-> sent for you. The DSH side is published to npm as `dsh-vscode-ref` and installs with
-> `dsh plugin --profile <profile> add dsh-vscode-ref`; the VS Code side ships as a `.vsix`.
+> sent for you. The DSH side is published to npm as `dsh-vscode-bridge-he` and installs with
+> `dsh plugin --profile <profile> add dsh-vscode-bridge-he`; the VS Code side ships as a `.vsix`.
 
 ## 交付物
 
