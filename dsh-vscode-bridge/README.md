@@ -37,16 +37,23 @@ The extension discovers the Host by itself: DSH writes its endpoint and token to
 `~/.dsh/vscode-bridge.json` (override with `DSH_VSCODE_BRIDGE_FILE`) on every start, so
 there is no token to copy by hand.
 
-### Finding out whether the extension is connected
+### Finding out whether the extension is installed
 
-The composer shows a small `⚠ VS Code 未连接` pill until the extension has sent its first
-reference. It disappears on first use and stays hidden afterwards; the `×` dismisses it for
-the current page.
+If this machine has never had the extension, the composer shows a red
+`⚠ VS Code 扩展未安装` pill with a **一键安装** button. It disappears as soon as either
 
-Zero references is the only signal the Host has, so the pill cannot tell "extension not
-installed" apart from "installed but never used" — it deliberately says *not connected*
-rather than *not installed*. If you have just installed the extension and the pill stays,
-reload the VS Code window.
+- the one-click install succeeds, or
+- the extension delivers its first reference,
+
+and it does **not** come back on later launches: the Host records the fact in
+`vscode-bridge-state.json` next to `vscode-bridge.json` (override the path with
+`DSH_VSCODE_BRIDGE_STATE`). Counting references alone would not work — that counter starts at
+zero on every DSH start, which made the pill reappear on every launch even with the extension
+installed and working.
+
+The `×` hides it for the current page. If VS Code is not installed at all, or its `code`
+command cannot be found, the pill stays red and names the reason, with a link to the manual
+steps.
 
 ## Usage
 

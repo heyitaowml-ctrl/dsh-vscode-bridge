@@ -1,4 +1,5 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -26,6 +27,9 @@ const PUBLISH_MAX_ATTEMPTS = 100;
 const VSIX_FILENAME = 'dsh-vscode-bridge.vsix';
 const INSTALL_TIMEOUT_MS = 60_000;
 const INSTALL_OUTPUT_MAX = 2_000;
+// Remembers, across DSH restarts, that this machine has the extension. Lives next
+// to vscode-bridge.json so a profile reset wipes both together.
+const STATE_FILENAME = 'vscode-bridge-state.json';
 // `code` first: it is what both the Microsoft build and most forks put on PATH.
 // The other two cover Insiders and VSCodium users who have no plain `code`.
 const CLI_NAMES = ['code', 'code-insiders', 'codium'];
@@ -75,6 +79,11 @@ const EDITOR_REFERENCES_PROMPT = [
 
 function bridgeFilePath() {
   return process.env.DSH_VSCODE_BRIDGE_FILE || join(homedir(), '.dsh', 'vscode-bridge.json');
+}
+
+/** Sidecar state file; overridable so tests can stay isolated. */
+function bridgeStateFile(bridgeFile) {
+  return process.env.DSH_VSCODE_BRIDGE_STATE || join(dirname(bridgeFile), STATE_FILENAME);
 }
 
 /** Directory of this package — where the bundled VSIX lives. */
@@ -281,6 +290,38 @@ export function apply(ctx) {
   const queue = [];
   const history = [];
   const bridgeFile = bridgeFilePath();
+  const stateFile = bridgeStateFile(bridgeFile);
+
+  // Whether this machine has ever had the extension must survive a restart:
+  // `sequence` resets to 0 on every start, so using it alone made the hint
+  // reappear on every launch even with the extension installed and working.
+  let extensionSeenAt;
+  let extensionInstalledAt;
+  try {
+    const state = JSON.parse(readFileSync(stateFile, 'utf8'));
+    if (typeof state?.extensionSeenAt === 'string') extensionSeenAt = state.extensionSeenAt;
+    if (typeof state?.extensionInstalledAt === 'string') extensionInstalledAt = state.extensionInstalledAt;
+  } catch {
+    // No state file yet (or it is unreadable): the extension is unknown.
+  }
+
+  const extensionKnown = () => extensionSeenAt !== undefined || extensionInstalledAt !== undefined;
+
+  const persistState = () => {
+    const payload = JSON.stringify({
+      extensionSeenAt: extensionSeenAt ?? null,
+      extensionInstalledAt: extensionInstalledAt ?? null,
+      updatedAt: new Date().toISOString(),
+    }, null, 2);
+    void (async () => {
+      try {
+        await mkdir(dirname(stateFile), { recursive: true });
+        await writeFile(stateFile, `${payload}\n`, { encoding: 'utf8', mode: 0o600 });
+      } catch (error) {
+        warn(`cannot write ${stateFile}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    })();
+  };
 
   let sequence = 0;
   let lastClientId;
@@ -468,6 +509,10 @@ export function apply(ctx) {
     };
     item.text = formatAttachmentText(item);
     lastAttachAt = item.receivedAt;
+    if (extensionSeenAt === undefined) {
+      extensionSeenAt = item.receivedAt;
+      persistState();
+    }
     const outcome = deliver(item);
     void publishBridgeFile();
     info(`attachment ${item.id}: ${item.kind} ${item.absolutePath}${item.startLine === undefined ? '' : ` lines ${item.startLine}-${item.endLine}`} delivered=${String(outcome.delivered)}`);
@@ -539,6 +584,9 @@ export function apply(ctx) {
         queued: queue.length,
         attachments: sequence,
         lastAttachAt: lastAttachAt ?? null,
+        extensionKnown: extensionKnown(),
+        extensionSeenAt: extensionSeenAt ?? null,
+        extensionInstalledAt: extensionInstalledAt ?? null,
       })}\n\n`);
     } catch {
       removeClient(client.id);
@@ -611,6 +659,9 @@ export function apply(ctx) {
       configFetches,
       attachments: sequence,
       lastAttachAt: lastAttachAt ?? null,
+      extensionKnown: extensionKnown(),
+      extensionSeenAt: extensionSeenAt ?? null,
+      extensionInstalledAt: extensionInstalledAt ?? null,
     });
   };
 
@@ -704,6 +755,12 @@ export function apply(ctx) {
       const stdout = clamp(handle.collected?.stdout?.readFrom(0)?.text ?? '');
       const stderr = clamp(handle.collected?.stderr?.readFrom(0)?.text ?? '');
       const ok = outcome?.exitCode === 0;
+      if (ok && extensionInstalledAt === undefined) {
+        // The install itself is proof enough that the machine has the extension,
+        // so the hint does not come back on the next launch.
+        extensionInstalledAt = new Date().toISOString();
+        persistState();
+      }
       info(`one-click install ${ok ? 'succeeded' : 'failed'} via ${cli} (exit ${String(outcome?.exitCode ?? null)})`);
       sendJson(res, 200, {
         ok,

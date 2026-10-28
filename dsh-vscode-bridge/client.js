@@ -30,10 +30,13 @@ window.__ModuleLoader__.load({
 
       // How many references the VS Code extension has ever sent to this Host
       // instance. `null` means the SSE handshake has not answered yet.
-      // Zero is the only honest signal we have: it cannot tell "extension not
-      // installed" apart from "installed but never used", so the hint says
-      // 未连接 (not connected) rather than 未安装 (not installed).
       const [attachments, setAttachments] = React.useState(null);
+      // Whether this machine has ever had the extension, as persisted by the Host
+      // (installed by the button, or having delivered at least one reference).
+      // `null` = not answered yet. This, not `attachments`, decides the hint:
+      // `attachments` resets on every Host restart, which made the pill reappear
+      // on every launch even with a working extension.
+      const [extensionKnown, setExtensionKnown] = React.useState(null);
       const [dismissed, setDismissed] = React.useState(false);
       // idle → installing → done | failed. `failed` keeps the manual link visible.
       const [install, setInstall] = React.useState({ phase: 'idle', message: '' });
@@ -49,6 +52,9 @@ window.__ModuleLoader__.load({
           const body = await response.json().catch(() => ({}));
           if (response.ok && body.ok === true) {
             setInstall({ phase: 'done', message: '' });
+            // The Host has just persisted this too; reflect it locally so the
+            // pill does not wait for the next handshake to disappear.
+            setExtensionKnown(true);
             return;
           }
           setInstall({
@@ -180,6 +186,7 @@ window.__ModuleLoader__.load({
                 if (current === null) return known;
                 return Math.max(current, known);
               });
+              setExtensionKnown(hello?.extensionKnown === true);
             } catch {
               // A malformed hello is not worth surfacing.
             }
@@ -204,7 +211,12 @@ window.__ModuleLoader__.load({
         };
       }, [sessionId]);
 
-      if (dismissed || attachments === null || attachments > 0) return null;
+      // Hidden once the Host says the machine has the extension (persisted across
+      // restarts), or as soon as a reference arrives in this session.
+      if (dismissed) return null;
+      if (attachments === null || extensionKnown === null) return null;
+      if (extensionKnown === true) return null;
+      if (attachments > 0) return null;
 
       const phase = install.phase;
       const label = phase === 'installing'
@@ -213,11 +225,19 @@ window.__ModuleLoader__.load({
           ? '已安装，请重载 VS Code 窗口'
           : phase === 'failed'
             ? `安装失败：${install.message}`
-            : '⚠ VS Code 未连接';
+            : '⚠ VS Code 扩展未安装';
+
+      // Red for "you need to do something", green once it is installed. Fixed
+      // colours rather than theme tokens: this pill has to read as a warning in
+      // both light and dark themes, and the tokens differ between them.
+      const alert = '#e5484d';
+      const good = '#2f9e44';
+      const tone = phase === 'done' ? good : alert;
+      const tint = phase === 'done' ? 'rgba(47,158,68,0.12)' : 'rgba(229,72,77,0.12)';
 
       const hint = phase === 'done'
         ? '扩展已装好。在 VS Code 里执行 Developer: Reload Window 后，右键菜单就会出现 DSH 命令。'
-        : '还没收到过 VS Code 扩展发来的引用。可以点「一键安装」把随包附带的 VSIX 装进本机 VS Code，或手动安装。';
+        : '本机还没装过 VS Code 扩展。点「一键安装」把随包附带的 VSIX 装进 VS Code，或手动安装。';
 
       const buttonStyle = {
         border: 'none',
@@ -229,8 +249,8 @@ window.__ModuleLoader__.load({
         textDecoration: 'underline',
       };
 
-      // Small, theme-neutral pill: it inherits the surrounding colour and only
-      // lowers its own opacity, so it stays readable in light and dark themes.
+      // Compact pill with a fixed alert/good colour so it reads as a warning in
+      // both themes; the text inherits nothing because red on red would vanish.
       return React.createElement(
         'span',
         {
@@ -244,8 +264,9 @@ window.__ModuleLoader__.load({
             fontSize: 11,
             lineHeight: '22px',
             borderRadius: 999,
-            border: '1px solid currentColor',
-            opacity: 0.7,
+            border: `1px solid ${tone}`,
+            background: tint,
+            color: tone,
             whiteSpace: 'nowrap',
             maxWidth: 520,
             overflow: 'hidden',
