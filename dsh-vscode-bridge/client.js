@@ -5,6 +5,9 @@ window.__ModuleLoader__.load({
 
     const RETRY_MS = 500;
     const MAX_SEEN = 200;
+    // How often an open page re-probes for the extension. Cheap: the Host caches a
+    // filesystem scan for a few seconds, and this only asks one local endpoint.
+    const RECHECK_MS = 30_000;
     // Where the install hint points. Kept in sync with the README's Install section.
     const INSTALL_DOC_URL = 'https://github.com/heyitaowml-ctrl/dsh-vscode-bridge#install';
 
@@ -88,6 +91,23 @@ window.__ModuleLoader__.load({
           // A failed recheck just leaves the pill as it was.
         }
       }, []);
+
+      // A user can uninstall the extension while this page is already open, and
+      // the handshake happens only on connect — so poll, and re-check whenever the
+      // tab regains focus. Without this the pill could never come back until a
+      // full page reload, which is exactly what made the state look stuck.
+      React.useEffect(() => {
+        const timer = setInterval(() => { void recheck(); }, RECHECK_MS);
+        const onFocus = () => { void recheck(); };
+        const onVisibility = () => { if (document.visibilityState === 'visible') void recheck(); };
+        window.addEventListener('focus', onFocus);
+        document.addEventListener('visibilitychange', onVisibility);
+        return () => {
+          clearInterval(timer);
+          window.removeEventListener('focus', onFocus);
+          document.removeEventListener('visibilitychange', onVisibility);
+        };
+      }, [recheck]);
 
       const queueRef = React.useRef([]);
       const seenRef = React.useRef(new Set());
@@ -363,6 +383,124 @@ window.__ModuleLoader__.load({
       );
     }
 
+    /**
+     * Settings → VS Code 桥接. A permanent place to look at the bridge and to
+     * rescan on demand — the composer pill disappears once the extension is
+     * present, so without a page like this there is no way to ask "is it still
+     * there?" after the pill has gone.
+     */
+    function VSCodeBridgeSettings() {
+      const [status, setStatus] = React.useState({ phase: 'loading', state: null, version: null, path: null, message: '' });
+
+      const load = React.useCallback(async () => {
+        setStatus((prev) => ({ ...prev, phase: 'loading', message: '' }));
+        try {
+          const response = await fetch('/dsh-vscode/health?refresh=1', {
+            cache: 'no-store',
+            credentials: 'same-origin',
+            headers: { accept: 'application/json' },
+          });
+          const body = await response.json().catch(() => ({}));
+          setStatus({
+            phase: 'ready',
+            state: body?.extensionState ?? 'unknown',
+            version: body?.extensionVersion ?? null,
+            path: body?.extensionPath ?? null,
+            message: '',
+          });
+        } catch (error) {
+          setStatus({
+            phase: 'ready',
+            state: 'unknown',
+            version: null,
+            path: null,
+            message: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }, []);
+
+      const install = React.useCallback(async () => {
+        setStatus((prev) => ({ ...prev, phase: 'installing', message: '' }));
+        try {
+          const response = await fetch('/dsh-vscode/install-extension', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { accept: 'application/json' },
+          });
+          const body = await response.json().catch(() => ({}));
+          if (response.ok && body?.ok === true) {
+            setStatus({ phase: 'ready', state: 'installed', version: null, path: null, message: '已安装。请在 VS Code 里执行 Developer: Reload Window 使命令生效。' });
+            return;
+          }
+          setStatus({
+            phase: 'ready',
+            state: null,
+            version: null,
+            path: null,
+            message: `安装失败：${String(body?.message ?? body?.code ?? `HTTP ${response.status}`)}`,
+          });
+        } catch (error) {
+          setStatus({ phase: 'ready', state: null, version: null, path: null, message: `安装失败：${error instanceof Error ? error.message : String(error)}` });
+        }
+      }, []);
+
+      React.useEffect(() => { void load(); }, [load]);
+
+      const tone = status.state === 'installed'
+        ? '#2f9e44'
+        : status.state === 'absent' ? '#e5484d' : '#8a8f98';
+      const stateLabel = status.phase === 'loading'
+        ? '正在扫描…'
+        : status.phase === 'installing'
+          ? '正在安装…'
+          : status.state === 'installed'
+            ? '已安装'
+            : status.state === 'absent' ? '未检测到' : '无法识别 Editor 目录';
+
+      const button = {
+        font: 'inherit',
+        fontSize: 12,
+        padding: '4px 10px',
+        borderRadius: 6,
+        border: '1px solid currentColor',
+        background: 'transparent',
+        color: 'inherit',
+        cursor: 'pointer',
+      };
+
+      const row = (label, value) => React.createElement(
+        'div',
+        { style: { display: 'flex', gap: 12, fontSize: 12, lineHeight: '22px' } },
+        React.createElement('span', { style: { minWidth: 64, opacity: 0.6 } }, label),
+        React.createElement('span', { style: { wordBreak: 'break-all' } }, value),
+      );
+
+      return React.createElement(
+        'div',
+        { style: { display: 'flex', flexDirection: 'column', gap: 6, padding: '2px 0' } },
+        row('状态', React.createElement('span', { style: { color: tone, fontWeight: 600 } }, stateLabel)),
+        status.version === null ? null : row('版本', status.version),
+        status.path === null ? null : row('路径', status.path),
+        status.message === '' ? null : row('结果', status.message),
+        React.createElement(
+          'div',
+          { style: { display: 'flex', gap: 8, marginTop: 6, flexWrap: 'wrap' } },
+          React.createElement('button', { type: 'button', style: button, onClick: () => { void load(); } }, '立即扫描'),
+          React.createElement('button', { type: 'button', style: button, onClick: () => { void install(); } }, '一键安装 / 重装'),
+          React.createElement(
+            'a',
+            { href: INSTALL_DOC_URL, target: '_blank', rel: 'noreferrer noopener', style: { ...button, textDecoration: 'none', display: 'inline-block' } },
+            '手动安装说明',
+          ),
+        ),
+        React.createElement(
+          'div',
+          { style: { fontSize: 11, opacity: 0.6, marginTop: 2, lineHeight: '18px' } },
+          'DSH 每次加载页面都会自动扫描一次，打开这个页面时也会扫描。扩展装在 VS Code、Insiders、VSCodium、Cursor、Windsurf 的扩展目录下都能识别；其它编辑器可用环境变量 DSH_VSCODE_EXTENSION_DIRS 指定。',
+        ),
+      );
+    }
+
     return {
       inject: ['slots'],
       apply(ctx) {
@@ -371,6 +509,13 @@ window.__ModuleLoader__.load({
           id: 'vscode-bridge',
           order: 90,
         }, VSCodeBridgeSlot));
+
+        ctx.slots.inject('settings.section', () => ctx.slots.register({
+          name: 'settings.section',
+          id: 'vscode-bridge',
+          order: 60,
+          label: 'VS Code 桥接',
+        }, VSCodeBridgeSettings));
       },
     };
   },

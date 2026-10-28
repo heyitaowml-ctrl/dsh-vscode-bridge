@@ -62,6 +62,13 @@ reinstall — that is what the pill is for. Earlier versions recorded "installed
 went silent after a manual uninstall; counting references was worse still, because that
 counter starts at zero on every DSH start.
 
+An open page also re-probes every 30 seconds and whenever the tab regains focus, so a
+mid-session uninstall brings the pill back without reloading the page.
+
+**Settings → VS Code 桥接** is the permanent home for this: it shows the probe result, the
+extension version and path, and offers 立即扫描 / 一键安装 / 手动安装说明. Use it when the pill is
+hidden but you want to confirm the extension is really there.
+
 Editing `vscode-bridge-state.json` by hand is safe: a UTF-8 BOM is stripped before parsing.
 
 ## Usage
