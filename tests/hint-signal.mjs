@@ -268,7 +268,31 @@ assert.equal(registered.extensionRegistered, true, 'a registry entry is authorit
 assert.equal(registered.extensionVersion, '1.0.1');
 
 delete process.env.DSH_VSCODE_EXTENSION_DIRS;
-await rmrf(scratch, { recursive: true, force: true });
 
 console.log('\nPASS: extension presence is detected on disk and beats stale state');
+
+// 8. CLI discovery. A user can install VS Code into a custom folder without adding
+//    it to PATH — the Windows registry is the only thing that knows about it — so
+//    check the search order honours an explicit override and still finds a real
+//    install once that override is stale.
+const { resolveCli } = await import(new URL('../dsh-vscode-bridge/index.js', import.meta.url).href);
+
+const fakeCli = join(scratch, 'fake-code.cmd');
+await writeFile(fakeCli, '@echo off\n', 'utf8');
+process.env.DSH_VSCODE_CLI = fakeCli;
+assert.equal(await resolveCli(undefined), fakeCli, 'DSH_VSCODE_CLI wins when the file exists');
+console.log('explicit override ->', fakeCli);
+
+process.env.DSH_VSCODE_CLI = join(scratch, 'does-not-exist.cmd');
+const discovered = await resolveCli(undefined);
+console.log('stale override, discovered ->', discovered ?? '(none)');
+if (process.platform === 'win32') {
+  assert.ok(discovered, 'a stale override must not stop discovery');
+  assert.match(discovered, /code(\.cmd)?$/iu, 'discovered path should be a code CLI');
+}
+delete process.env.DSH_VSCODE_CLI;
+
+await rmrf(scratch, { recursive: true, force: true });
+
+console.log('\nPASS: CLI discovery honours the override and falls back');
 process.exit(0);

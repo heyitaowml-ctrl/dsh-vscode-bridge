@@ -1,6 +1,6 @@
 {
   "name": "dsh-vscode-bridge-he",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "type": "module",
   "description": "Send a VS Code selection or file path into the open DSH conversation as an @path reference, without sending the message.",
   "license": "MulanPSL-2.0",

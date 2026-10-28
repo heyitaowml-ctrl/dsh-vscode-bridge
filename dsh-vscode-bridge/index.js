@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { readFileSync, readdirSync } from 'node:fs';
 import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
@@ -14,6 +15,10 @@ import { fileURLToPath } from 'node:url';
  */
 
 export const inject = ['webServer'];
+
+// Exported for tests: the CLI search order is the part most likely to break on a
+// machine we cannot reproduce (custom install dir, no PATH, portable build).
+export { resolveCli, detectExtension };
 
 const ROUTE_PREFIX = '/dsh-vscode';
 const MAX_BODY_BYTES = 64 * 1024;
@@ -206,11 +211,65 @@ const clamp = (text) => {
 };
 
 /**
- * Find a VS Code CLI. The Host's own executable resolution comes first because it
- * knows the scrubbed PATH the rest of DSH uses; the absolute candidates are only a
- * fallback for installs that never put `code` on PATH.
+ * Default value of a Windows registry key, or undefined.
+ *
+ * `reg.exe` is the only registry access Node has without a native module, so this
+ * costs one short-lived process — and only on the fallback path, after PATH lookup
+ * has already failed.
+ */
+function regDefault(key) {
+  try {
+    const out = execFileSync('reg.exe', ['query', key, '/ve'], {
+      encoding: 'utf8',
+      windowsHide: true,
+      timeout: 5_000,
+    });
+    const match = /REG_\w+\s+(.+?)\s*$/mu.exec(out);
+    return match === null ? undefined : match[1].trim();
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Locate a CLI through the Windows registry.
+ *
+ * VS Code writes `App Paths\Code.exe` for both the user and the system installer,
+ * pointing at wherever the user chose to install — including paths that never
+ * reached PATH (a custom folder, a portable install with the shell integration
+ * skipped). The `bin\code.cmd` shim always sits beside the executable.
+ */
+function cliFromWindowsRegistry() {
+  if (process.platform !== 'win32') return undefined;
+  for (const hive of ['HKCU', 'HKLM']) {
+    const exe = regDefault(`${hive}\\Software\\Microsoft\\Windows\\CurrentVersion\\App Paths\\Code.exe`);
+    if (typeof exe === 'string' && exe !== '') {
+      const cmd = join(dirname(exe), 'bin', 'code.cmd');
+      return cmd;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Find a VS Code CLI, in the order that is most likely to be right:
+ *
+ *   1. DSH_VSCODE_CLI — an explicit path, for anything we cannot discover
+ *   2. the Host's own resolution — it knows the scrubbed PATH the rest of DSH uses
+ *   3. the Windows registry — the only source that knows about custom install dirs
+ *   4. well-known absolute locations — a last net for portable/odd installs
  */
 async function resolveCli(subprocess) {
+  const override = process.env.DSH_VSCODE_CLI;
+  if (typeof override === 'string' && override.trim() !== '') {
+    const candidate = override.trim();
+    try {
+      if ((await stat(candidate)).isFile()) return candidate;
+    } catch {
+      // Fall through: a stale override must not disable the other strategies.
+    }
+  }
+
   if (typeof subprocess?.resolveExecutable === 'function') {
     for (const name of CLI_NAMES) {
       try {
@@ -221,6 +280,16 @@ async function resolveCli(subprocess) {
       }
     }
   }
+
+  const fromRegistry = cliFromWindowsRegistry();
+  if (fromRegistry !== undefined) {
+    try {
+      if ((await stat(fromRegistry)).isFile()) return fromRegistry;
+    } catch {
+      // The registry can point at something uninstalled; keep going.
+    }
+  }
+
   for (const candidate of cliCandidates()) {
     try {
       const info = await stat(candidate);

@@ -37,6 +37,29 @@ The extension discovers the Host by itself: DSH writes its endpoint and token to
 `~/.dsh/vscode-bridge.json` (override with `DSH_VSCODE_BRIDGE_FILE`) on every start, so
 there is no token to copy by hand.
 
+### Where the one-click install looks for `code`
+
+VS Code's installer adds `code` to PATH only when its "Add to PATH" box was left checked, and
+a portable or custom-directory install never does. The Host therefore searches, in order:
+
+1. `DSH_VSCODE_CLI` — an explicit path, if you set one
+2. the Host's own PATH resolution, for `code`, `code-insiders`, `codium`
+3. the Windows registry (`App Paths\Code.exe`), which is the only record of a **custom install
+   directory** that never reached PATH — this is what makes a custom install work
+4. well-known absolute locations (`%LOCALAPPDATA%\Programs\Microsoft VS Code\bin\code.cmd`,
+   `Program Files`, and the macOS/Linux equivalents)
+
+If none of them match, the pill says `cli_not_found` and lists what it tried; set
+`DSH_VSCODE_CLI` to your `code` shim to settle it.
+
+### Offline behaviour
+
+`dsh plugin add dsh-vscode-bridge-he` is a single download and brings everything with it —
+the Host, the browser half and the `.vsix` (about 82 kB unpacked). The one-click install then
+runs `code --install-extension` against that **local** VSIX, so it needs no network at all.
+Nothing in the Host or browser half fetches a remote URL; the only external link is the
+manual-install page, which opens in a browser and is optional.
+
 ### Finding out whether the extension is installed
 
 When the extension is missing, the composer shows a red `⚠ VS Code 扩展未安装` pill with
