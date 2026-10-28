@@ -42,20 +42,26 @@ there is no token to copy by hand.
 When the extension is missing, the composer shows a red `⚠ VS Code 扩展未安装` pill with
 **一键安装**, **重新检测** and **手动** actions. It disappears once the extension is present.
 
-**Presence is decided by looking, not by remembering.** On every page load and on every
-`/health?refresh=1` the Host scans the editor extension directories for
-`<publisher>.dsh-vscode-bridge-<version>`, and there are three outcomes:
+**Presence is decided by looking, not by remembering.** The Host reads the editor's own
+`extensions.json` registry — the only authoritative record of what that editor considers
+installed — falling back to the folder layout only for editors that keep no registry:
 
 | Probe | Meaning | Pill |
 | --- | --- | --- |
-| `installed` | a matching folder exists | hidden |
-| `absent` | an editor extensions directory exists and nothing matched | **shown** |
+| `installed` | the registry names it (or, with no registry, a matching folder exists) | hidden |
+| `absent` | an editor exists and does not have it, **even if leftover folders do** | **shown** |
 | `unknown` | no editor directory exists at all (or it is unreadable) | falls back to remembered state |
 
-That distinction is deliberate: "not found" is only trustworthy when there was somewhere to
-look. On a layout the Host cannot recognise it defers to `vscode-bridge-state.json` (next to
-`vscode-bridge.json`; override the paths with `DSH_VSCODE_BRIDGE_STATE` and
-`DSH_VSCODE_EXTENSION_DIRS`) instead of guessing.
+The registry is what makes this reliable. `code --install-extension` can unpack the VSIX and
+still leave the editor's registry untouched — a ghost folder that looks installed but whose
+commands never load. Trusting the folder hid the hint for exactly that case; the probe now
+reports `absent` and `/health` exposes `extensionRegistered: false` when only the folder
+matched. The install endpoint therefore answers `installed_not_registered` instead of
+claiming success in that situation.
+
+"Not found" is only trustworthy when there was somewhere to look, so on a layout the Host
+cannot recognise it defers to `vscode-bridge-state.json` (next to `vscode-bridge.json`;
+override the paths with `DSH_VSCODE_BRIDGE_STATE` and `DSH_VSCODE_EXTENSION_DIRS`).
 
 So if you delete the extension in VS Code, DSH notices on the next page load and offers to
 reinstall — that is what the pill is for. Earlier versions recorded "installed" forever and

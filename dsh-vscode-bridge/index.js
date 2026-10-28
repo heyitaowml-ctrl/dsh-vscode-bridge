@@ -36,6 +36,8 @@ const DETECT_TTL_MS = 5_000;
 // Anchored at the end on purpose: a renamed leftover (`…1.0.1.bak`), a `.disabled`
 // copy or an interrupted install must not count as an installed extension.
 const EXTENSION_DIR_PATTERN = /^.+\.dsh-vscode-bridge-(\d+\.\d+\.\d+)$/u;
+// `<publisher>.dsh-vscode-bridge` — how extensions.json spells the id.
+const EXTENSION_ID_PATTERN = /\.dsh-vscode-bridge$/u;
 // `code` first: it is what both the Microsoft build and most forks put on PATH.
 // The other two cover Insiders and VSCodium users who have no plain `code`.
 const CLI_NAMES = ['code', 'code-insiders', 'codium'];
@@ -108,33 +110,89 @@ function extensionRoots(home = homedir(), env = process.env) {
 }
 
 /**
+ * Read one editor's `extensions.json` registry.
+ *
+ * This file — not the folder layout — is what VS Code considers installed. A
+ * `code --install-extension` that never completed can leave the unpacked folder
+ * behind with no registry entry, and trusting the folder reports "installed" for
+ * an extension the editor does not have.
+ */
+function readExtensionRegistry(root) {
+  try {
+    // Strip a leading BOM: Windows editors add one, and JSON.parse rejects it.
+    const raw = readFileSync(join(root, 'extensions.json'), 'utf8').replace(/^\uFEFF/u, '');
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Look for the unpacked extension on disk.
  *
  * Three outcomes, because "not found" is only trustworthy when we actually had a
  * place to look:
- *   installed — a matching folder exists
- *   absent    — at least one editor extension directory exists and none matched
+ *   installed — a registry entry names it (or, without a registry, a matching folder)
+ *   absent    — an editor exists and does not have it, even if leftover folders do
  *   unknown   — no editor directory exists at all (or the scan failed), so the
  *               caller must fall back to remembered state instead of guessing
+ *
+ * `registered: false` on an installed result means only the folder matched, i.e.
+ * the editor has not recorded the extension and its commands will not load.
  */
 function detectExtension(roots = extensionRoots()) {
+  const leftoverFolders = [];
   let looked = 0;
+
   for (const root of roots) {
-    let entries;
+    let dirs;
     try {
-      entries = readdirSync(root, { withFileTypes: true });
+      dirs = readdirSync(root, { withFileTypes: true });
     } catch {
       continue;
     }
     looked += 1;
-    for (const entry of entries) {
-      if (!entry.isDirectory()) continue;
-      const match = EXTENSION_DIR_PATTERN.exec(entry.name);
-      if (match !== null) {
-        return { state: 'installed', root, path: join(root, entry.name), version: match[1] };
+
+    const registry = readExtensionRegistry(root);
+    if (registry !== undefined) {
+      const hit = registry.find((entry) => typeof entry?.identifier?.id === 'string'
+        && EXTENSION_ID_PATTERN.test(entry.identifier.id.toLowerCase()));
+      if (hit !== undefined) {
+        const relative = typeof hit.relativeLocation === 'string' ? hit.relativeLocation : '';
+        return {
+          state: 'installed',
+          registered: true,
+          root,
+          path: relative !== '' ? join(root, relative) : join(root),
+          version: typeof hit.version === 'string' ? hit.version : undefined,
+        };
+      }
+      // The registry is authoritative for this editor: no entry means absent,
+      // which is exactly what turns a half-finished install into a visible hint.
+      continue;
+    }
+
+    for (const entry of dirs) {
+      if (entry.isDirectory() && EXTENSION_DIR_PATTERN.test(entry.name)) {
+        leftoverFolders.push({ root, name: entry.name });
       }
     }
   }
+
+  if (leftoverFolders.length > 0) {
+    // An editor with no registry at all: the folder is the only evidence we have.
+    const first = leftoverFolders[0];
+    const version = EXTENSION_DIR_PATTERN.exec(first.name)?.[1];
+    return {
+      state: 'installed',
+      registered: false,
+      root: first.root,
+      path: join(first.root, first.name),
+      version,
+    };
+  }
+
   return { state: looked > 0 ? 'absent' : 'unknown' };
 }
 
@@ -673,6 +731,7 @@ export function apply(ctx) {
         lastAttachAt: lastAttachAt ?? null,
         extensionKnown: extensionKnown(true),
         extensionState: probe.state,
+        extensionRegistered: probe.registered ?? null,
         extensionPath: probe.path ?? null,
         extensionVersion: probe.version ?? null,
         extensionSeenAt: extensionSeenAt ?? null,
@@ -759,6 +818,7 @@ export function apply(ctx) {
       lastAttachAt: lastAttachAt ?? null,
       extensionKnown: extensionKnown(force),
       extensionState: probe.state,
+      extensionRegistered: probe.registered ?? null,
       extensionPath: probe.path ?? null,
       extensionVersion: probe.version ?? null,
       extensionSeenAt: extensionSeenAt ?? null,
@@ -856,6 +916,7 @@ export function apply(ctx) {
       const stdout = clamp(handle.collected?.stdout?.readFrom(0)?.text ?? '');
       const stderr = clamp(handle.collected?.stderr?.readFrom(0)?.text ?? '');
       const ok = outcome?.exitCode === 0;
+      let verified;
       if (ok) {
         // Drop the cached probe so the next hello/health sees the new folder, and
         // remember the install in case this editor lives outside the roots we scan.
@@ -865,18 +926,30 @@ export function apply(ctx) {
           extensionInstalledAt = new Date().toISOString();
           persistState();
         }
+        verified = currentExtension(true);
       }
       info(`one-click install ${ok ? 'succeeded' : 'failed'} via ${cli} (exit ${String(outcome?.exitCode ?? null)})`);
+
+      // `code --install-extension` can copy the files and still leave the editor's
+      // registry untouched (it happened on this machine). Say so instead of
+      // claiming success, otherwise the user is left with a ghost folder and a
+      // hint that never comes back.
+      const registered = verified === undefined ? null : verified.state === 'installed' && verified.registered === true;
+      const ghost = ok && registered === false;
       sendJson(res, 200, {
-        ok,
-        code: ok ? 'installed' : 'install_failed',
+        ok: ok && !ghost,
+        code: ghost ? 'installed_not_registered' : ok ? 'installed' : 'install_failed',
+        extensionState: verified?.state ?? null,
+        extensionRegistered: registered,
         cli,
         exitCode: outcome?.exitCode ?? null,
         stdout,
         stderr,
-        message: ok
-          ? 'installed — reload the VS Code window to pick up the DSH commands'
-          : '`code --install-extension` returned a non-zero exit code',
+        message: ghost
+          ? 'VSIX 已解包，但 VS Code 没有登记它：请先启动一次 VS Code，再回到这里重新检测'
+          : ok
+            ? 'installed — reload the VS Code window to pick up the DSH commands'
+            : '`code --install-extension` returned a non-zero exit code',
       });
     } catch (error) {
       const aborted = controller.signal.aborted;

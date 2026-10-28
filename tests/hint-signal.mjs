@@ -242,6 +242,31 @@ console.log('missing root:', JSON.stringify(unknown));
 assert.equal(unknown.extensionState, 'unknown');
 assert.equal(unknown.extensionKnown, true, 'an unreadable editor layout falls back to the state file');
 
+// A half-finished `code --install-extension` leaves the folder without touching the
+// editor registry. That ghost must read as absent, or the hint never comes back —
+// this is exactly the state this machine ended up in.
+const ghostRoot = join(scratch, 'ghost');
+await mkdirp(join(ghostRoot, 'heyitaowml.dsh-vscode-bridge-1.0.1'), { recursive: true });
+await writeFile(join(ghostRoot, 'extensions.json'), JSON.stringify([
+  { identifier: { id: 'ms-vscode.powershell' }, version: '1.0.0', relativeLocation: 'ms-vscode.powershell-1.0.0' },
+]), 'utf8');
+const ghost = await healthWithRoots(ghostRoot, 'ghost');
+console.log('ghost root:', JSON.stringify(ghost));
+assert.equal(ghost.extensionState, 'absent', 'a folder VS Code never registered is not installed');
+assert.equal(ghost.extensionKnown, false);
+
+// A registry entry, on the other hand, is authoritative.
+const registryRoot = join(scratch, 'registered');
+await mkdirp(join(registryRoot, 'heyitaowml.dsh-vscode-bridge-1.0.1'), { recursive: true });
+await writeFile(join(registryRoot, 'extensions.json'), JSON.stringify([
+  { identifier: { id: 'heyitaowml.dsh-vscode-bridge' }, version: '1.0.1', relativeLocation: 'heyitaowml.dsh-vscode-bridge-1.0.1' },
+]), 'utf8');
+const registered = await healthWithRoots(registryRoot, 'registered');
+console.log('registry root:', JSON.stringify(registered));
+assert.equal(registered.extensionState, 'installed');
+assert.equal(registered.extensionRegistered, true, 'a registry entry is authoritative');
+assert.equal(registered.extensionVersion, '1.0.1');
+
 delete process.env.DSH_VSCODE_EXTENSION_DIRS;
 await rmrf(scratch, { recursive: true, force: true });
 
