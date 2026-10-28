@@ -1,64 +1,51 @@
+# Packages the VS Code extension half with the official vsce CLI.
+#
+#   powershell -NoProfile -ExecutionPolicy Bypass -File packages/scripts/build-vsix.ps1
+#   powershell ... -File packages/scripts/build-vsix.ps1 -Install
+#
+# vsce generates the VSIX manifest and [Content_Types].xml itself, which is why the
+# hand-maintained copies that used to live in vscode-dsh-bridge/vsix/ are gone: they
+# hard-coded Publisher="local" and could not carry a PNG icon.
+#
+# Publishing to the Marketplace (one-time setup is in the README):
+#   1. create a publisher at https://marketplace.visualstudio.com/manage
+#   2. create an Azure DevOps PAT with the Marketplace > Manage scope
+#   3. $env:VSCE_PAT = '<pat>'
+#   4. powershell ... -File packages/scripts/build-vsix.ps1 -Publish
+
 param(
-  [switch]$Install
+  [switch]$Install,
+  [switch]$Publish
 )
 
 $ErrorActionPreference = 'Stop'
 
 $root = Split-Path -Parent $PSScriptRoot
-$src = Join-Path $root 'vscode-dsh-bridge'
+$ext = Join-Path $root 'vscode-dsh-bridge'
 $dist = Join-Path $root 'dist'
-$version = '1.0.0'
-$dest = Join-Path $dist "dsh-vscode-bridge-$version.vsix"
+$vsix = Join-Path $dist 'dsh-vscode-bridge.vsix'
 
+if (-not (Test-Path $ext)) { throw "extension directory not found: $ext" }
 New-Item -ItemType Directory -Force -Path $dist | Out-Null
-if (Test-Path -LiteralPath $dest) {
-  Remove-Item -LiteralPath $dest -Force
-}
 
-Add-Type -AssemblyName System.IO.Compression
-Add-Type -AssemblyName System.IO.Compression.FileSystem
-
-$entries = @(
-  @{ Source = (Join-Path $src 'vsix\[Content_Types].xml'); Entry = '[Content_Types].xml' },
-  @{ Source = (Join-Path $src 'vsix\extension.vsixmanifest'); Entry = 'extension.vsixmanifest' },
-  @{ Source = (Join-Path $src 'package.json'); Entry = 'extension/package.json' },
-  @{ Source = (Join-Path $src 'extension.js'); Entry = 'extension/extension.js' },
-  @{ Source = (Join-Path $src 'README.md'); Entry = 'extension/README.md' },
-  @{ Source = (Join-Path $src 'CHANGELOG.md'); Entry = 'extension/CHANGELOG.md' },
-  @{ Source = (Join-Path $src 'LICENSE.txt'); Entry = 'extension/LICENSE.txt' }
-)
-
-foreach ($entry in $entries) {
-  if (-not (Test-Path -LiteralPath $entry.Source)) {
-    throw "Missing VSIX source file: $($entry.Source)"
-  }
-}
-
-$zip = [System.IO.Compression.ZipFile]::Open($dest, [System.IO.Compression.ZipArchiveMode]::Create)
+# The repository uses `master`; vsce would otherwise rewrite relative README links
+# against `main` and point them at files that do not exist.
+Push-Location $ext
 try {
-  foreach ($entry in $entries) {
-    [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
-      $zip,
-      $entry.Source,
-      $entry.Entry,
-      [System.IO.Compression.CompressionLevel]::Optimal
-    ) | Out-Null
+  if ($Publish) {
+    if (-not $env:VSCE_PAT) { throw 'VSCE_PAT is not set; create an Azure DevOps PAT with the Marketplace > Manage scope first' }
+    npx --yes @vscode/vsce publish --githubBranch master
+    if ($LASTEXITCODE -ne 0) { throw "vsce publish failed with exit code $LASTEXITCODE" }
+  } else {
+    npx --yes @vscode/vsce package --githubBranch master --out $vsix
+    if ($LASTEXITCODE -ne 0) { throw "vsce package failed with exit code $LASTEXITCODE" }
+    Write-Output ("Built {0} ({1} bytes)" -f $vsix, (Get-Item -LiteralPath $vsix).Length)
   }
 } finally {
-  $zip.Dispose()
-}
-
-$zip = [System.IO.Compression.ZipFile]::OpenRead($dest)
-try {
-  Write-Output "Built $dest ($((Get-Item -LiteralPath $dest).Length) bytes)"
-  $zip.Entries | ForEach-Object { Write-Output ("  {0} ({1} bytes)" -f $_.FullName, $_.Length) }
-} finally {
-  $zip.Dispose()
+  Pop-Location
 }
 
 if ($Install) {
-  & code --install-extension $dest --force
-  if ($LASTEXITCODE -ne 0) {
-    throw "code --install-extension failed with exit code $LASTEXITCODE"
-  }
+  & code --install-extension $vsix --force
+  if ($LASTEXITCODE -ne 0) { throw "code --install-extension failed with exit code $LASTEXITCODE" }
 }

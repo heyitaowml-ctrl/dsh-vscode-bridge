@@ -13,13 +13,40 @@
 | --- | --- |
 | [`dsh-vscode-bridge/`](dsh-vscode-bridge/) | DSH bundle：Host HTTP/SSE 服务 + 浏览器端输入框注入 |
 | [`vscode-dsh-bridge/`](vscode-dsh-bridge/) | VS Code 扩展源码 |
-| [`dist/dsh-vscode-bridge-1.0.0.vsix`](dist/dsh-vscode-bridge-1.0.0.vsix) | 可直接安装的 VS Code 扩展包 |
+| [`dist/dsh-vscode-bridge.vsix`](dist/dsh-vscode-bridge.vsix) | 可直接安装的 VS Code 扩展包（由官方 `vsce` 构建） |
 | [`dist/dsh-vscode-bridge-1.0.4.zip`](dist/dsh-vscode-bridge-1.0.4.zip) | DSH bundle 的单文件分发包（Windows 解压后安装） |
 | [`dist/dsh-vscode-bridge-1.0.4.tgz`](dist/dsh-vscode-bridge-1.0.4.tgz) | 同一 bundle 的 tar.gz 分发包（带正斜杠路径，跨平台） |
 | [`dist/local-dsh-vscode-bridge-1.0.4.tgz`](dist/local-dsh-vscode-bridge-1.0.4.tgz) | **npm 格式 tarball**，可托管到 Gitee 后用 URL 直接安装 |
 | [`scripts/build-vsix.ps1`](scripts/build-vsix.ps1) | 重新构建 VSIX |
 | [`tests/bridge-e2e.mjs`](tests/bridge-e2e.mjs) | Host 路由 / 队列 / SSE 回归测试 |
 | [`tests/test-extension.cjs`](tests/test-extension.cjs) | 用 mock `vscode` 走通扩展命令的集成测试 |
+
+## 发布 VS Code 扩展
+
+扩展现在用官方 `vsce` 打包（脚本：`scripts/build-vsix.ps1`），`vscode-dsh-bridge/vsix/` 那套手工清单已删除——它把 `Publisher="local"` 写死了，也没法带 PNG 图标。
+
+```powershell
+# 打包
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-vsix.ps1
+# 装到本机 VS Code
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-vsix.ps1 -Install
+```
+
+上架 Marketplace 的一次性准备：
+
+1. 用 Microsoft 账号登录 https://marketplace.visualstudio.com/manage → **Create publisher**，
+   ID 填 `heyitaowml`（要和 `package.json` 里的 `publisher` 一致，**建完不能改**）
+2. 到 https://dev.azure.com 建 Personal Access Token：Organization 选 *All accessible organizations*，
+   Scopes 里勾 **Marketplace → Manage**
+3. 设置 Token 并发布：
+
+```powershell
+$env:VSCE_PAT = '<你的 PAT>'
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-vsix.ps1 -Publish
+```
+
+> ⚠️ 微软已宣布 Azure DevOps 全局 PAT 将于 2026-12-01 停用，之后要换成 Entra ID 认证
+> （`vsce publish --azure-credential`）。现在用 PAT 仍然可以。
 
 ## 当前状态
 

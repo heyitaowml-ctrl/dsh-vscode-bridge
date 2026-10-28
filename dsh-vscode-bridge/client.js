@@ -1,10 +1,12 @@
 window.__ModuleLoader__.load({
-  id: '@local/dsh-vscode-bridge',
+  id: 'dsh-vscode-bridge-he',
   factory(require) {
     const React = require('react');
 
     const RETRY_MS = 500;
     const MAX_SEEN = 200;
+    // Where the install hint points. Kept in sync with the README's Install section.
+    const INSTALL_DOC_URL = 'https://github.com/heyitaowml-ctrl/dsh-vscode-bridge#install';
 
     /**
      * Invisible composer participant: it owns the SSE subscription for the
@@ -25,6 +27,14 @@ window.__ModuleLoader__.load({
       // The dock slot guarantees useInput; subscribing to the draft lets the
       // insertion add a separator only when the current draft needs one.
       const draft = props.useInput((snapshot) => snapshot.draft);
+
+      // How many references the VS Code extension has ever sent to this Host
+      // instance. `null` means the SSE handshake has not answered yet.
+      // Zero is the only honest signal we have: it cannot tell "extension not
+      // installed" apart from "installed but never used", so the hint says
+      // 未连接 (not connected) rather than 未安装 (not installed).
+      const [attachments, setAttachments] = React.useState(null);
+      const [dismissed, setDismissed] = React.useState(false);
 
       const queueRef = React.useRef([]);
       const seenRef = React.useRef(new Set());
@@ -130,6 +140,7 @@ window.__ModuleLoader__.load({
                 }
               }
               queueRef.current.push(item.text);
+              setAttachments((current) => (current === null ? 1 : current + 1));
               flushRef.current();
             } catch (error) {
               console.warn('[dsh-vscode-bridge] invalid attachment event', error);
@@ -139,6 +150,12 @@ window.__ModuleLoader__.load({
             try {
               const hello = JSON.parse(event.data);
               console.info('[dsh-vscode-bridge] connected', hello);
+              const reported = Number(hello?.attachments ?? 0);
+              setAttachments((current) => {
+                const known = Number.isFinite(reported) && reported > 0 ? reported : 0;
+                if (current === null) return known;
+                return Math.max(current, known);
+              });
             } catch {
               // A malformed hello is not worth surfacing.
             }
@@ -163,7 +180,64 @@ window.__ModuleLoader__.load({
         };
       }, [sessionId]);
 
-      return null;
+      if (dismissed || attachments === null || attachments > 0) return null;
+
+      // Small, theme-neutral pill: it inherits the surrounding text colour and
+      // only lowers its own opacity, so it stays readable in light and dark.
+      return React.createElement(
+        'span',
+        {
+          style: {
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 2,
+            height: 22,
+            padding: '0 2px 0 8px',
+            marginRight: 4,
+            fontSize: 11,
+            lineHeight: '22px',
+            borderRadius: 999,
+            border: '1px solid currentColor',
+            opacity: 0.6,
+            whiteSpace: 'nowrap',
+          },
+        },
+        React.createElement(
+          'a',
+          {
+            href: INSTALL_DOC_URL,
+            target: '_blank',
+            rel: 'noreferrer noopener',
+            title: '还没收到过 VS Code 扩展发来的引用。没装过就点这里看安装步骤；装过的话，请在 VS Code 里执行 Developer: Reload Window。',
+            style: { color: 'inherit', textDecoration: 'none', cursor: 'pointer' },
+            onClick: (event) => event.stopPropagation(),
+          },
+          '⚠ VS Code 未连接',
+        ),
+        React.createElement(
+          'button',
+          {
+            type: 'button',
+            title: '不再提示',
+            'aria-label': 'dismiss the VS Code extension hint',
+            onClick: (event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              setDismissed(true);
+            },
+            style: {
+              border: 'none',
+              background: 'transparent',
+              color: 'inherit',
+              cursor: 'pointer',
+              fontSize: 13,
+              lineHeight: '18px',
+              padding: '0 4px',
+            },
+          },
+          '×',
+        ),
+      );
     }
 
     return {

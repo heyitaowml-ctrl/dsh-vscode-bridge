@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.1
+
+- Marketplace-ready packaging: PNG icon, real `publisher` id, `repository` metadata so the
+  Marketplace can resolve relative README links.
+- Built with the official `vsce` CLI; the hand-maintained `vsix/` manifest is gone.
+
 ## 1.0.0
 
 - Initial release.

@@ -206,6 +206,7 @@ export function apply(ctx) {
   let sequence = 0;
   let lastClientId;
   let lastSessionId;
+  let lastAttachAt;
   let published = false;
   let publishing = false;
   let publishAttempts = 0;
@@ -386,6 +387,7 @@ export function apply(ctx) {
       ...attachment,
     };
     item.text = formatAttachmentText(item);
+    lastAttachAt = item.receivedAt;
     const outcome = deliver(item);
     void publishBridgeFile();
     info(`attachment ${item.id}: ${item.kind} ${item.absolutePath}${item.startLine === undefined ? '' : ` lines ${item.startLine}-${item.endLine}`} delivered=${String(outcome.delivered)}`);
@@ -455,6 +457,8 @@ export function apply(ctx) {
         connected: true,
         sessionId: sessionId ?? null,
         queued: queue.length,
+        attachments: sequence,
+        lastAttachAt: lastAttachAt ?? null,
       })}\n\n`);
     } catch {
       removeClient(client.id);
@@ -518,6 +522,8 @@ export function apply(ctx) {
       queued: queue.length,
       sessionId: lastSessionId ?? null,
       configFetches,
+      attachments: sequence,
+      lastAttachAt: lastAttachAt ?? null,
     });
   };
 

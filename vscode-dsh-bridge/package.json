@@ -2,14 +2,21 @@
   "name": "dsh-vscode-bridge",
   "displayName": "DSH VSCode Bridge",
   "description": "Send selected code ranges or file paths from VS Code to the current DSH conversation.",
-  "version": "1.0.0",
-  "publisher": "local",
+  "version": "1.0.1",
+  "publisher": "heyitaowml",
   "license": "MIT",
+  "icon": "icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/heyitaowml-ctrl/dsh-vscode-bridge.git",
+    "directory": "vscode-dsh-bridge"
+  },
   "engines": {
     "vscode": "^1.85.0"
   },
   "categories": [
-    "Other"
+    "Other",
+    "Machine Learning"
   ],
   "keywords": [
     "dsh",

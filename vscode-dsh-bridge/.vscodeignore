@@ -1,0 +1,10 @@
+# Keep the VSIX to what the extension actually needs at runtime.
+# Everything here is either development-only or generated.
+.vscode/**
+node_modules/**
+tests/**
+**/*.map
+**/*.ts
+**/*.tgz
+**/*.zip
+**/*.vsix
