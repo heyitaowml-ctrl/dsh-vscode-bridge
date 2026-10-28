@@ -1,10 +1,10 @@
-{
+﻿{
   "name": "dsh-vscode-bridge-he",
   "version": "1.0.4",
   "type": "module",
   "description": "Send a VS Code selection or file path into the open DSH conversation as an @path reference, without sending the message.",
   "license": "MulanPSL-2.0",
-  "author": "<YOUR NAME>",
+  "author": "HeYitao",
   "keywords": [
     "dsh",
     "dsh-plugin",
@@ -16,12 +16,12 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/<OWNER>/dsh-vscode-bridge.git",
+    "url": "git+https://github.com/heyitaowml-ctrl/dsh-vscode-bridge.git",
     "directory": "dsh-vscode-bridge"
   },
-  "homepage": "https://github.com/<OWNER>/dsh-vscode-bridge#readme",
+  "homepage": "https://github.com/heyitaowml-ctrl/dsh-vscode-bridge#readme",
   "bugs": {
-    "url": "https://github.com/<OWNER>/dsh-vscode-bridge/issues"
+    "url": "https://github.com/heyitaowml-ctrl/dsh-vscode-bridge/issues"
   },
   "exports": {
     ".": "./index.js",
