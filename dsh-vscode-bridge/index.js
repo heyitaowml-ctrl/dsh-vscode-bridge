@@ -892,6 +892,7 @@ export function apply(ctx) {
       extensionVersion: probe.version ?? null,
       extensionSeenAt: extensionSeenAt ?? null,
       extensionInstalledAt: extensionInstalledAt ?? null,
+      vsixPath: join(packageDir(), VSIX_FILENAME),
     });
   };
 
@@ -1037,6 +1038,86 @@ export function apply(ctx) {
     }
   };
 
+  /**
+   * Open this machine's file manager on the bundled VSIX.
+   *
+   * A page served from http:// cannot navigate to file://, so "show me the file"
+   * has to happen on the Host side. Same trust + POST rules as the installer: it
+   * launches a local GUI process, so a cross-site request must not reach it.
+   */
+  const handleRevealVsix = async (req, res) => {
+    if (req.method !== 'POST') {
+      sendJson(res, 405, { ok: false, code: 'method_not_allowed' });
+      return;
+    }
+    if (!trustedPageRequest(req)) {
+      sendJson(res, 403, { ok: false, code: 'forbidden' });
+      return;
+    }
+
+    const vsix = join(packageDir(), VSIX_FILENAME);
+    try {
+      const info = await stat(vsix);
+      if (!info.isFile()) throw new Error('not a file');
+    } catch {
+      sendJson(res, 200, {
+        ok: false,
+        code: 'vsix_missing',
+        message: `this package is missing its bundled VSIX (${VSIX_FILENAME})`,
+      });
+      return;
+    }
+
+    const subprocess = (() => {
+      try {
+        return typeof ctx.get === 'function' ? ctx.get('subprocess') : ctx.subprocess;
+      } catch {
+        return undefined;
+      }
+    })();
+    if (typeof subprocess?.spawn !== 'function') {
+      sendJson(res, 200, {
+        ok: false,
+        code: 'spawn_unavailable',
+        path: vsix,
+        message: 'this Host does not expose the subprocess service; the VSIX is at the path below',
+      });
+      return;
+    }
+
+    // `/select,` and the path as separate argv is what explorer.exe expects when the
+    // path contains spaces; the other platforms take the path directly.
+    const argv = process.platform === 'win32'
+      ? ['explorer.exe', '/select,', vsix]
+      : process.platform === 'darwin'
+        ? ['open', '-R', vsix]
+        : ['xdg-open', dirname(vsix)];
+
+    try {
+      const handle = subprocess.spawn({
+        argv,
+        cwd: dirname(vsix),
+        stdio: { stdin: 'ignore', stdout: 'ignore', stderr: 'ignore' },
+        graceMs: 3_000,
+      });
+      // File managers are GUI processes that may never exit; do not wait on them.
+      await Promise.race([
+        Promise.resolve(handle.done).catch(() => undefined),
+        new Promise((resolve) => setTimeout(resolve, 1_500)),
+      ]);
+      info(`revealed ${vsix}`);
+      sendJson(res, 200, { ok: true, path: vsix });
+    } catch (error) {
+      warn(`reveal failed: ${error instanceof Error ? error.message : String(error)}`);
+      sendJson(res, 200, {
+        ok: false,
+        code: 'spawn_failed',
+        path: vsix,
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  };
+
   ctx.effect(() => {
     const disposers = [
       ctx.webServer.register({ kind: 'exact', path: `${ROUTE_PREFIX}/attach`, handler: handleAttach }),
@@ -1049,6 +1130,20 @@ export function apply(ctx) {
         handler: (req, res) => {
           void handleInstallExtension(req, res).catch((error) => {
             warn(`install route failed: ${error instanceof Error ? error.message : String(error)}`);
+            try {
+              sendJson(res, 500, { ok: false, code: 'internal_error' });
+            } catch {
+              // The response may already be gone.
+            }
+          });
+        },
+      }),
+      ctx.webServer.register({
+        kind: 'exact',
+        path: `${ROUTE_PREFIX}/reveal-vsix`,
+        handler: (req, res) => {
+          void handleRevealVsix(req, res).catch((error) => {
+            warn(`reveal route failed: ${error instanceof Error ? error.message : String(error)}`);
             try {
               sendJson(res, 500, { ok: false, code: 'internal_error' });
             } catch {

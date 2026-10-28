@@ -92,6 +92,27 @@ window.__ModuleLoader__.load({
         }
       }, []);
 
+      // A page on http:// cannot navigate to file://, so "show me the VSIX" has to
+      // be done by the Host. The fallback is the path itself, which the user can
+      // paste anywhere.
+      const revealVsix = React.useCallback(async () => {
+        try {
+          const response = await fetch('/dsh-vscode/reveal-vsix', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { accept: 'application/json' },
+          });
+          const body = await response.json().catch(() => ({}));
+          if (response.ok && body?.ok === true) return;
+          setInstall({
+            phase: 'failed',
+            message: `打不开目录，VSIX 在这里：${String(body?.path ?? body?.message ?? body?.code ?? response.status)}`,
+          });
+        } catch (error) {
+          setInstall({ phase: 'failed', message: `打不开目录：${error instanceof Error ? error.message : String(error)}` });
+        }
+      }, []);
+
       // A user can uninstall the extension while this page is already open, and
       // the handshake happens only on connect — so poll, and re-check whenever the
       // tab regains focus. Without this the pill could never come back until a
@@ -347,13 +368,16 @@ window.__ModuleLoader__.load({
           '重新检测',
         ),
         (phase === 'idle' || phase === 'failed') && React.createElement(
-          'a',
+          'button',
           {
-            href: INSTALL_DOC_URL,
-            target: '_blank',
-            rel: 'noreferrer noopener',
-            style: { color: 'inherit', cursor: 'pointer', padding: '0 4px' },
-            onClick: (event) => event.stopPropagation(),
+            type: 'button',
+            style: buttonStyle,
+            title: '在资源管理器里打开本机随包附带的 VSIX，手动安装用',
+            onClick: (event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              void revealVsix();
+            },
           },
           '手动',
         ),
@@ -446,6 +470,26 @@ window.__ModuleLoader__.load({
 
       React.useEffect(() => { void load(); }, [load]);
 
+      // Same Host-side reveal as the pill, so the settings page can also open the
+      // bundled VSIX in the file manager.
+      const reveal = React.useCallback(async () => {
+        try {
+          const response = await fetch('/dsh-vscode/reveal-vsix', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { accept: 'application/json' },
+          });
+          const body = await response.json().catch(() => ({}));
+          if (response.ok && body?.ok === true) {
+            setStatus((prev) => ({ ...prev, message: `已打开：${String(body.path ?? '')}` }));
+            return;
+          }
+          setStatus((prev) => ({ ...prev, message: `打不开目录，VSIX 在这里：${String(body?.path ?? body?.message ?? body?.code ?? response.status)}` }));
+        } catch (error) {
+          setStatus((prev) => ({ ...prev, message: `打不开目录：${error instanceof Error ? error.message : String(error)}` }));
+        }
+      }, []);
+
       const tone = status.state === 'installed'
         ? '#2f9e44'
         : status.state === 'absent' ? '#e5484d' : '#8a8f98';
@@ -487,10 +531,11 @@ window.__ModuleLoader__.load({
           { style: { display: 'flex', gap: 8, marginTop: 6, flexWrap: 'wrap' } },
           React.createElement('button', { type: 'button', style: button, onClick: () => { void load(); } }, '立即扫描'),
           React.createElement('button', { type: 'button', style: button, onClick: () => { void install(); } }, '一键安装 / 重装'),
+          React.createElement('button', { type: 'button', style: button, onClick: () => { void reveal(); } }, '打开 VSIX 目录'),
           React.createElement(
             'a',
-            { href: INSTALL_DOC_URL, target: '_blank', rel: 'noreferrer noopener', style: { ...button, textDecoration: 'none', display: 'inline-block' } },
-            '手动安装说明',
+            { href: INSTALL_DOC_URL, target: '_blank', rel: 'noreferrer noopener', style: { ...button, textDecoration: 'none', display: 'inline-block', opacity: 0.75 } },
+            '安装说明（GitHub）',
           ),
         ),
         React.createElement(

@@ -18,13 +18,15 @@ dsh plugin --profile <profile> add dsh-vscode-bridge-he
 ```
 
 **2 · VS Code half** — easiest is the **一键安装** button next to the
-`⚠ VS Code 未连接` pill in the composer: the Host runs `code --install-extension` against the
-VSIX bundled in this package, so nothing is downloaded. It only runs when you click, and it
-needs a `code` CLI it can find (PATH first, then the usual install locations for Windows,
-macOS and Linux); if it cannot find one it says so and you install manually:
+`⚠ VS Code 扩展未安装` pill in the composer: the Host runs `code --install-extension` against
+the VSIX bundled in this package, so nothing is downloaded. It only runs when you click, and
+it needs a `code` CLI it can find (see below). When that is not possible — no `code`, a
+portable build, a locked-down machine — the **手动** button opens this machine's file manager
+on the bundled VSIX (`explorer.exe /select,…` on Windows, `open -R` on macOS), so you can
+install it by hand without hunting for the file:
 
-- **Extensions view:** open VS Code → Extensions → `…` → **Install from VSIX…** → choose
-  [`dist/dsh-vscode-bridge.vsix`](https://github.com/heyitaowml-ctrl/dsh-vscode-bridge/raw/master/dist/dsh-vscode-bridge.vsix)
+- **Extensions view:** open VS Code → Extensions → `…` → **Install from VSIX…** → pick
+  `dsh-vscode-bridge.vsix` in the folder that just opened
 - **Terminal:**
   ```sh
   code --install-extension dsh-vscode-bridge.vsix

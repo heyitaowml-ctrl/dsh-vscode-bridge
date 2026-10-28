@@ -164,6 +164,32 @@ console.log('trusted install ->', trustedBody.code);
 
 console.log('\nPASS: one-click install endpoint is gated and fails gracefully');
 
+// 4b. "Show me the VSIX" has to happen on the Host (a page cannot open file://).
+//     It must be gated the same way, and must still answer with the path when it
+//     cannot launch a file manager, so the UI can print it.
+assert.ok(routes.has('/dsh-vscode/reveal-vsix'), 'reveal route registered');
+
+function callReveal(headers) {
+  const res = fakeRes();
+  routes.get('/dsh-vscode/reveal-vsix')(
+    { method: 'POST', url: '/dsh-vscode/reveal-vsix', headers, on() { return this; } },
+    res,
+  );
+  return res;
+}
+
+const revealUntrusted = callReveal({});
+await settled(revealUntrusted);
+assert.equal(revealUntrusted.statusCode, 403, 'reveal route rejects a request with no page trust');
+
+const revealTrusted = callReveal({ 'sec-fetch-site': 'same-origin' });
+const revealBody = await settled(revealTrusted);
+console.log('trusted reveal ->', revealBody.code ?? 'ok', revealBody.path ?? '');
+assert.ok(['spawn_unavailable', 'vsix_missing'].includes(revealBody.code), `unexpected reveal code: ${revealBody.code}`);
+assert.match(String(revealBody.path), /dsh-vscode-bridge\.vsix$/u, 'reveal reports the local VSIX path');
+
+console.log('\nPASS: reveal endpoint is gated and reports the local VSIX');
+
 // 5. The actual bug this state file exists for: a restarted Host has
 //    attachments === 0 again, and the pill used to come back with it.
 await new Promise((r) => setTimeout(r, 200));
