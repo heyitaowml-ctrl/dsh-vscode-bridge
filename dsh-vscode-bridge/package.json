@@ -1,9 +1,28 @@
 {
-  "name": "@local/dsh-vscode-bridge",
+  "name": "dsh-vscode-ref",
   "version": "1.0.4",
-  "private": true,
   "type": "module",
-  "description": "Send VSCode selections and file paths into the current DSH conversation.",
+  "description": "Send a VS Code selection or file path into the open DSH conversation as an @path reference, without sending the message.",
+  "license": "MulanPSL-2.0",
+  "author": "<YOUR NAME>",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek",
+    "deepseek-harness",
+    "vscode",
+    "editor",
+    "context"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/<OWNER>/dsh-vscode-bridge.git",
+    "directory": "dsh-vscode-bridge"
+  },
+  "homepage": "https://github.com/<OWNER>/dsh-vscode-bridge#readme",
+  "bugs": {
+    "url": "https://github.com/<OWNER>/dsh-vscode-bridge/issues"
+  },
   "exports": {
     ".": "./index.js",
     "./client": "./client.js",
@@ -16,8 +35,15 @@
     "cordis.patch.yml",
     "locale/*.json",
     "icon.svg",
+    "assets/icon-180.png",
     "README.md"
   ],
+  "engines": {
+    "dsh": ">=0.2.1-alpha.1 <0.3.0-0"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-client-ui-conversation": ">=0.2.1-alpha.1 <0.3.0-0"
+  },
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"

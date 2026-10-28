@@ -1,3 +1,5 @@
+# Loader patch contributed by this bundle.
+# `name` must be the exact npm package name so Node module resolution finds it.
 - insert:
-    - id: dsh-vscode-bridge
-      name: '@local/dsh-vscode-bridge'
+    - id: dsh-vscode-ref
+      name: dsh-vscode-ref

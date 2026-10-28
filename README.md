@@ -2,6 +2,11 @@
 
 把 VS Code 里选中的代码范围，或文件的绝对路径，直接添加到**当前 DSH 对话的输入框**。它不会自动发送消息，你可以继续在 DSH 里补充问题，类似 Cursor 的“Add to Chat”。
 
+> **English** — Right-click a selection or a file in VS Code and it lands in the open DSH
+> conversation as an `@path` reference with its line range, at the composer caret. Nothing is
+> sent for you. The DSH side is published to npm as `dsh-vscode-ref` and installs with
+> `dsh plugin --profile <profile> add dsh-vscode-ref`; the VS Code side ships as a `.vsix`.
+
 ## 交付物
 
 | 路径 | 内容 |
