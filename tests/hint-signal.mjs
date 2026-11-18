@@ -318,6 +318,25 @@ if (process.platform === 'win32') {
 }
 delete process.env.DSH_VSCODE_CLI;
 
+// 9. The regression this test exists for: `code` on PATH can belong to a VS Code
+//    fork (Qoder, Cursor, VSCodium). Its `code --install-extension` reports success
+//    but unpacks the VSIX into *that* editor, so the pill never clears. The
+//    registry's App Paths key belongs to real VS Code and must win over PATH.
+if (process.platform === 'win32') {
+  const forkSubprocess = {
+    async resolveExecutable() {
+      return 'C:\\Fake\\Qoder CN IDE\\bin\\code.cmd';
+    },
+  };
+  const chosen = await resolveCli(forkSubprocess);
+  console.log('PATH says Qoder, chosen ->', chosen ?? '(none)');
+  assert.ok(chosen, 'a real VS Code is installed here, so something must be found');
+  assert.ok(
+    !/qoder/iu.test(chosen),
+    `a fork on PATH must not win over the registry (got ${chosen})`,
+  );
+}
+
 await rmrf(scratch, { recursive: true, force: true });
 
 console.log('\nPASS: CLI discovery honours the override and falls back');

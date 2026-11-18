@@ -232,31 +232,49 @@ function regDefault(key) {
 }
 
 /**
- * Locate a CLI through the Windows registry.
+ * Locate a VS Code CLI through the Windows registry.
  *
  * VS Code writes `App Paths\Code.exe` for both the user and the system installer,
  * pointing at wherever the user chose to install — including paths that never
  * reached PATH (a custom folder, a portable install with the shell integration
  * skipped). The `bin\code.cmd` shim always sits beside the executable.
+ *
+ * This key is owned by real VS Code, which is exactly why it is consulted before
+ * PATH: other VS Code forks (Qoder, Cursor, VSCodium) ship their own `code` shim,
+ * and if one of them comes first in PATH then `code --install-extension` unpacks
+ * the VSIX into *that* editor while reporting success — the extension lands in an
+ * editor the user never opened, and the pill stays red forever.
  */
 function cliFromWindowsRegistry() {
   if (process.platform !== 'win32') return undefined;
-  for (const hive of ['HKCU', 'HKLM']) {
-    const exe = regDefault(`${hive}\\Software\\Microsoft\\Windows\\CurrentVersion\\App Paths\\Code.exe`);
-    if (typeof exe === 'string' && exe !== '') {
-      const cmd = join(dirname(exe), 'bin', 'code.cmd');
-      return cmd;
+  for (const key of ['Code.exe', 'Code - Insiders.exe']) {
+    for (const hive of ['HKCU', 'HKLM']) {
+      const exe = regDefault(`${hive}\\Software\\Microsoft\\Windows\\CurrentVersion\\App Paths\\${key}`);
+      if (typeof exe === 'string' && exe !== '') {
+        return join(dirname(exe), 'bin', 'code.cmd');
+      }
     }
   }
   return undefined;
 }
 
 /**
+ * `code` on PATH can belong to a VS Code fork rather than VS Code. This recognises
+ * the ones we know about so the install can say so instead of silently succeeding
+ * into the wrong editor.
+ */
+const FOREIGN_CLI_PATTERN = /qoder|cursor|windsurf|vscodium|trae|kiro/iu;
+
+const looksForeign = (cli) => typeof cli === 'string' && FOREIGN_CLI_PATTERN.test(cli);
+
+/**
  * Find a VS Code CLI, in the order that is most likely to be right:
  *
  *   1. DSH_VSCODE_CLI — an explicit path, for anything we cannot discover
- *   2. the Host's own resolution — it knows the scrubbed PATH the rest of DSH uses
- *   3. the Windows registry — the only source that knows about custom install dirs
+ *   2. the Windows registry — authoritative for "this is real VS Code", and the only
+ *      source that knows about custom install dirs
+ *   3. the Host's own resolution — it knows the scrubbed PATH the rest of DSH uses,
+ *      but PATH may point at a VS Code fork (see cliFromWindowsRegistry)
  *   4. well-known absolute locations — a last net for portable/odd installs
  */
 async function resolveCli(subprocess) {
@@ -270,6 +288,15 @@ async function resolveCli(subprocess) {
     }
   }
 
+  const fromRegistry = cliFromWindowsRegistry();
+  if (fromRegistry !== undefined) {
+    try {
+      if ((await stat(fromRegistry)).isFile()) return fromRegistry;
+    } catch {
+      // The registry can point at something uninstalled; keep going.
+    }
+  }
+
   if (typeof subprocess?.resolveExecutable === 'function') {
     for (const name of CLI_NAMES) {
       try {
@@ -278,15 +305,6 @@ async function resolveCli(subprocess) {
       } catch {
         // Not resolvable here; try the next name.
       }
-    }
-  }
-
-  const fromRegistry = cliFromWindowsRegistry();
-  if (fromRegistry !== undefined) {
-    try {
-      if ((await stat(fromRegistry)).isFile()) return fromRegistry;
-    } catch {
-      // The registry can point at something uninstalled; keep going.
     }
   }
 
@@ -496,6 +514,32 @@ export function apply(ctx) {
     detected = detectExtension();
     detectedAt = now;
     return detected;
+  };
+
+  // Which CLI a one-click install would use. Resolving it spawns reg.exe on
+  // Windows, so it is cached and refreshed in the background instead of on every
+  // /health poll. Reporting it matters: `code` on PATH may belong to a VS Code
+  // fork, and then the install quietly succeeds into the wrong editor.
+  const CLI_TTL_MS = 60_000;
+  const cliCache = { value: undefined, at: 0 };
+  const subprocessService = () => {
+    try {
+      return typeof ctx.get === 'function' ? ctx.get('subprocess') : ctx.subprocess;
+    } catch {
+      return undefined;
+    }
+  };
+  const refreshCliCache = () => {
+    const now = Date.now();
+    if (cliCache.at !== 0 && now - cliCache.at < CLI_TTL_MS) return;
+    cliCache.at = now;
+    void resolveCli(subprocessService())
+      .then((found) => {
+        cliCache.value = found;
+      })
+      .catch(() => {
+        // Leave the previous answer; a failed probe is not worth clearing it.
+      });
   };
 
   /**
@@ -876,6 +920,7 @@ export function apply(ctx) {
       // A malformed query is not worth rejecting the whole request for.
     }
     const probe = currentExtension(force);
+    refreshCliCache();
     sendJson(res, 200, {
       ok: true,
       version: 1,
@@ -893,6 +938,8 @@ export function apply(ctx) {
       extensionSeenAt: extensionSeenAt ?? null,
       extensionInstalledAt: extensionInstalledAt ?? null,
       vsixPath: join(packageDir(), VSIX_FILENAME),
+      cli: cliCache.value ?? null,
+      cliIsFork: looksForeign(cliCache.value),
     });
   };
 
@@ -931,13 +978,7 @@ export function apply(ctx) {
       return;
     }
 
-    const subprocess = (() => {
-      try {
-        return typeof ctx.get === 'function' ? ctx.get('subprocess') : ctx.subprocess;
-      } catch {
-        return undefined;
-      }
-    })();
+    const subprocess = subprocessService();
 
     const cli = await resolveCli(subprocess);
     if (cli === undefined) {
@@ -1006,17 +1047,23 @@ export function apply(ctx) {
       // hint that never comes back.
       const registered = verified === undefined ? null : verified.state === 'installed' && verified.registered === true;
       const ghost = ok && registered === false;
+      // A fork's `code` shim reports success too, but the files go to that fork, so
+      // naming the CLI is the difference between "guess why" and "oh, that's Qoder".
+      const forkCli = ghost && looksForeign(cli);
       sendJson(res, 200, {
         ok: ok && !ghost,
         code: ghost ? 'installed_not_registered' : ok ? 'installed' : 'install_failed',
         extensionState: verified?.state ?? null,
         extensionRegistered: registered,
         cli,
+        cliIsFork: looksForeign(cli),
         exitCode: outcome?.exitCode ?? null,
         stdout,
         stderr,
         message: ghost
-          ? 'VSIX 已解包，但 VS Code 没有登记它：请先启动一次 VS Code，再回到这里重新检测'
+          ? forkCli
+            ? `扩展被装到了另一个编辑器里（${cli}），不是 VS Code：把 DSH_VSCODE_CLI 指向 VS Code 的 bin\\code.cmd 再试`
+            : 'VSIX 已解包，但 VS Code 没有登记它：请先启动一次 VS Code，再回到这里重新检测'
           : ok
             ? 'installed — reload the VS Code window to pick up the DSH commands'
             : '`code --install-extension` returned a non-zero exit code',
@@ -1068,13 +1115,7 @@ export function apply(ctx) {
       return;
     }
 
-    const subprocess = (() => {
-      try {
-        return typeof ctx.get === 'function' ? ctx.get('subprocess') : ctx.subprocess;
-      } catch {
-        return undefined;
-      }
-    })();
+    const subprocess = subprocessService();
     if (typeof subprocess?.spawn !== 'function') {
       sendJson(res, 200, {
         ok: false,

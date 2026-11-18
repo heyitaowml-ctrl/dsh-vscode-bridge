@@ -45,14 +45,22 @@ VS Code's installer adds `code` to PATH only when its "Add to PATH" box was left
 a portable or custom-directory install never does. The Host therefore searches, in order:
 
 1. `DSH_VSCODE_CLI` — an explicit path, if you set one
-2. the Host's own PATH resolution, for `code`, `code-insiders`, `codium`
-3. the Windows registry (`App Paths\Code.exe`), which is the only record of a **custom install
-   directory** that never reached PATH — this is what makes a custom install work
+2. the Windows registry (`App Paths\Code.exe`, then `Code - Insiders.exe`), which is both the
+   only record of a **custom install directory** and the only reliable proof that the `code`
+   being run is real VS Code
+3. the Host's own PATH resolution, for `code`, `code-insiders`, `codium`
 4. well-known absolute locations (`%LOCALAPPDATA%\Programs\Microsoft VS Code\bin\code.cmd`,
    `Program Files`, and the macOS/Linux equivalents)
 
+The registry deliberately comes before PATH. Several VS Code forks (Qoder, Cursor, VSCodium,
+Windsurf, Trae) ship their own `code` shim, and if one of them comes first in PATH then
+`code --install-extension` reports success while unpacking the VSIX into *that* editor — the
+extension ends up somewhere you never opened and the pill stays red. If only a fork is
+available, the install result names the CLI it used instead of claiming VS Code was updated.
+
 If none of them match, the pill says `cli_not_found` and lists what it tried; set
-`DSH_VSCODE_CLI` to your `code` shim to settle it.
+`DSH_VSCODE_CLI` to your `code` shim to settle it. `/health` reports the CLI it would use as
+`cli`, plus `cliIsFork` when that path looks like another editor.
 
 ### Offline behaviour
 
